@@ -1,92 +1,141 @@
-import React, { useEffect, useRef } from 'react';
+// src/components/RectSelector.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Rect } from '../types';
-import { normToDisplayRect } from '../lib/detector';
+import { clamp } from '../lib/detector';
 
 type Props = {
   containerRef: React.RefObject<HTMLElement>;
-  roi: Rect;
-  rows: number;
-  cols: number;
-  hotIndex: number | null;
-  lastHit: { r: number; c: number } | null;
-  confidence: number;
+  roi: Rect; // normalized 0..1
+  onChange: (r: Rect) => void;
+  enabled: boolean;
 };
 
-export default function GridOverlay({
-  containerRef, roi, rows, cols, hotIndex, lastHit, confidence
-}: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+type DragState =
+  | { kind: 'none' }
+  | { kind: 'move'; startX: number; startY: number; roiStart: Rect }
+  | { kind: 'resize'; corner: string; startX: number; startY: number; roiStart: Rect };
+
+const HANDLES = ['nw','n','ne','e','se','s','sw','w'] as const;
+
+export default function RectSelector({ containerRef, roi, onChange, enabled }: Props) {
+  const [drag, setDrag] = useState<DragState>({ kind: 'none' });
+  const roiRef = useRef(roi);
+  roiRef.current = roi;
+
+  // Use PERCENTAGES so size/position stays correct even before container measures
+  const style = useMemo(() => {
+    return {
+      left: `${roi.x * 100}%`,
+      top: `${roi.y * 100}%`,
+      width: `${roi.width * 100}%`,
+      height: `${roi.height * 100}%`,
+    } as React.CSSProperties;
+  }, [roi]);
+
+  // Keyboard nudge (only when enabled)
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+      e.preventDefault();
+      const el = containerRef.current!;
+      const w = el?.clientWidth || 1;
+      const h = el?.clientHeight || 1;
+      const dx = (e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0) / Math.max(1, w);
+      const dy = (e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0) / Math.max(1, h);
+      onChange({
+        ...roiRef.current,
+        x: clamp(roiRef.current.x + dx, 0, 1 - roiRef.current.width),
+        y: clamp(roiRef.current.y + dy, 0, 1 - roiRef.current.height),
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled, containerRef, onChange]);
+
+  const onMouseDownRect = (e: React.MouseEvent) => {
+    if (!enabled) return;
+    e.preventDefault();
+    setDrag({ kind: 'move', startX: e.clientX, startY: e.clientY, roiStart: roi });
+  };
+
+  const onMouseDownHandle = (corner: string) => (e: React.MouseEvent) => {
+    if (!enabled) return;
+    e.preventDefault();
+    e.stopPropagation(); // critical: don’t trigger the move handler
+    setDrag({ kind: 'resize', corner, startX: e.clientX, startY: e.clientY, roiStart: roi });
+  };
 
   useEffect(() => {
-    const el = containerRef.current;
-    const cvs = canvasRef.current;
-    if (!el || !cvs) return;
+    const onMove = (e: MouseEvent) => {
+      const el = containerRef.current;
+      if (!el) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const w = el.clientWidth;
-    const h = el.clientHeight;
-    cvs.width = Math.round(w * dpr);
-    cvs.height = Math.round(h * dpr);
-    cvs.style.width = `${w}px`;
-    cvs.style.height = `${h}px`;
-    const ctx = cvs.getContext('2d')!;
-    ctx.clearRect(0, 0, cvs.width, cvs.height);
+      if (drag.kind === 'move') {
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        const dx = (e.clientX - drag.startX) / Math.max(1, w);
+        const dy = (e.clientY - drag.startY) / Math.max(1, h);
+        onChange({
+          ...drag.roiStart,
+          x: clamp(drag.roiStart.x + dx, 0, 1 - drag.roiStart.width),
+          y: clamp(drag.roiStart.y + dy, 0, 1 - drag.roiStart.height),
+        });
+      } else if (drag.kind === 'resize') {
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        const dx = (e.clientX - drag.startX) / Math.max(1, w);
+        const dy = (e.clientY - drag.startY) / Math.max(1, h);
 
-    ctx.save();
-    ctx.scale(dpr, dpr);
+        let { x, y, width, height } = drag.roiStart;
+        const minSize = 0.03;
+        const corner = drag.corner;
 
-    const R = normToDisplayRect(roi, w, h);
+        let left = x, right = x + width, top = y, bottom = y + height;
 
-    // ROI outline
-    ctx.strokeStyle = 'rgba(245,166,35,0.7)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(R.x, R.y, R.width, R.height);
-    ctx.setLineDash([]);
+        if (corner.includes('w')) left += dx;
+        if (corner.includes('e')) right += dx;
+        if (corner.includes('n')) top += dy;
+        if (corner.includes('s')) bottom += dy;
 
-    // Grid lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx.lineWidth = 1;
-    for (let r = 1; r < rows; r++) {
-      const y = R.y + (R.height * r) / rows;
-      ctx.beginPath(); ctx.moveTo(R.x, y); ctx.lineTo(R.x + R.width, y); ctx.stroke();
-    }
-    for (let c = 1; c < cols; c++) {
-      const x = R.x + (R.width * c) / cols;
-      ctx.beginPath(); ctx.moveTo(x, R.y); ctx.lineTo(x, R.y + R.height); ctx.stroke();
-    }
+        left = clamp(left, 0, 1);
+        right = clamp(right, 0, 1);
+        top = clamp(top, 0, 1);
+        bottom = clamp(bottom, 0, 1);
 
-    const cellW = R.width / cols;
-    const cellH = R.height / rows;
+        if (right - left < minSize) {
+          if (corner.includes('w')) left = right - minSize; else right = left + minSize;
+        }
+        if (bottom - top < minSize) {
+          if (corner.includes('n')) top = bottom - minSize; else bottom = top + minSize;
+        }
 
-    if (hotIndex != null) {
-      const hr = Math.floor(hotIndex / cols);
-      const hc = hotIndex % cols;
-      const x = R.x + hc * cellW;
-      const y = R.y + hr * cellH;
-      ctx.fillStyle = 'rgba(78,205,196,0.22)';
-      ctx.fillRect(x, y, cellW, cellH);
-      ctx.strokeStyle = 'rgba(78,205,196,0.9)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
-    }
+        x = clamp(Math.min(left, right), 0, 1 - minSize);
+        y = clamp(Math.min(top, bottom), 0, 1 - minSize);
+        width = clamp(Math.abs(right - left), minSize, 1 - x);
+        height = clamp(Math.abs(bottom - top), minSize, 1 - y);
 
-    if (lastHit) {
-      const x = R.x + lastHit.c * cellW;
-      const y = R.y + lastHit.r * cellH;
-      ctx.fillStyle = 'rgba(123,216,143,0.16)';
-      ctx.fillRect(x, y, cellW, cellH);
-      ctx.strokeStyle = 'rgba(123,216,143,0.8)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
-    }
+        onChange({ x, y, width, height });
+      }
+    };
+    const onUp = () => setDrag({ kind: 'none' });
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [drag, containerRef, onChange]);
 
-    ctx.fillStyle = 'white';
-    ctx.font = '12px ui-sans-serif, system-ui';
-    ctx.fillText(`Confidence: ${(confidence * 100).toFixed(0)}%`, Math.round(R.x), Math.round(R.y) - 6);
+  if (!enabled) return null;
 
-    ctx.restore();
-  }, [containerRef, roi, rows, cols, hotIndex, lastHit, confidence]);
-
-  return <canvas ref={canvasRef} className="overlay-canvas" />;
+  return (
+    <div className="overlay-layer" style={{ pointerEvents: 'none' }}>
+      <div className="roi-rect" style={style} onMouseDown={onMouseDownRect}>
+        {HANDLES.map((c) => (
+          <div key={c} className="roi-handle" data-corner={c} onMouseDown={onMouseDownHandle(c)} />
+        ))}
+      </div>
+    </div>
+  );
 }

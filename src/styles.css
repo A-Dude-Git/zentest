@@ -129,6 +129,9 @@ video {
   display: block;
 }
 
+.overlay-layer { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
+.overlay-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+
 .overlay-canvas, .overlay-layer {
   position: absolute;
   inset: 0;
@@ -139,26 +142,28 @@ video {
   position: absolute;
   border: 2px dashed var(--accent-2);
   background: var(--roi);
-  pointer-events: auto;
+  pointer-events: auto; /* allow dragging/resizing */
+  z-index: 40;          /* above everything */
 }
-/* Increase hit area and raise above the ROI box */
+
 .roi-handle {
   position: absolute;
-  width: 14px;       /* was 10px */
-  height: 14px;      /* was 10px */
+  width: 14px;
+  height: 14px;
   border-radius: 3px;
   background: var(--accent-2);
   border: 1px solid #00000066;
-  z-index: 2;
+  z-index: 41;
 }
-.roi-handle[data-corner="nw"] { left: -6px; top: -6px; cursor: nwse-resize; }
-.roi-handle[data-corner="ne"] { right: -6px; top: -6px; cursor: nesw-resize; }
-.roi-handle[data-corner="sw"] { left: -6px; bottom: -6px; cursor: nesw-resize; }
-.roi-handle[data-corner="se"] { right: -6px; bottom: -6px; cursor: nwse-resize; }
-.roi-handle[data-corner="n"] { left: calc(50% - 5px); top: -6px; cursor: ns-resize; }
-.roi-handle[data-corner="s"] { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
-.roi-handle[data-corner="w"] { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
-.roi-handle[data-corner="e"] { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+
+.roi-handle[data-corner="nw"] { left: -7px; top: -7px; cursor: nwse-resize; }
+.roi-handle[data-corner="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
+.roi-handle[data-corner="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.roi-handle[data-corner="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.roi-handle[data-corner="n"]  { left: calc(50% - 7px); top: -7px; cursor: ns-resize; }
+.roi-handle[data-corner="s"]  { left: calc(50% - 7px); bottom: -7px; cursor: ns-resize; }
+.roi-handle[data-corner="w"]  { top: calc(50% - 7px); left: -7px; cursor: ew-resize; }
+.roi-handle[data-corner="e"]  { top: calc(50% - 7px); right: -7px; cursor: ew-resize; }
 
 .pattern-grid {
   display: grid;
