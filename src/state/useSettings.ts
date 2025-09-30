@@ -47,7 +47,13 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
     emaAlpha: 0.12,
     appendAcrossRounds: d === 'expert' ? false : true,
     idleGapMs: 2000,
-    useManualArm: d === 'expert' ? true : false // manual “Arm Next Round” by default for Expert
+
+    // Hands-free cycling defaults
+    autoRoundDetect: true,
+    revealMaxISI: 550,     // system-driven flashes are usually brisk and consistent
+    clusterGapMs: 650,     // gap larger than this means "reveal finished"
+    inputTimeoutMs: 12000, // user gets up to 12s to re-enter
+    rearmDelayMs: 120      // small delay before next arm
   };
 }
 
