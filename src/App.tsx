@@ -80,6 +80,8 @@ export default function App() {
 
   const playingInfo = `Detected: ${detector.state.steps.length}`;
 
+  const resetRoi = () => setRoi({ x: 0.15, y: 0.15, width: 0.7, height: 0.7 });
+
   return (
     <div className="app">
       <div className="header">
