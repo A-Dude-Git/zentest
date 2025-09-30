@@ -20,7 +20,7 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
   const [drag, setDrag] = useState<DragState>({ kind: 'none' });
   const roiRef = useRef(roi); roiRef.current = roi;
 
-  // Percent-based style (no dependence on container size at paint time)
+  // Percent-based style so it renders correctly before container measures
   const style = useMemo(() => ({
     left: `${roi.x * 100}%`,
     top: `${roi.y * 100}%`,
@@ -28,20 +28,41 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
     height: `${roi.height * 100}%`,
   }) as React.CSSProperties, [roi]);
 
-  // Move vs. resize
   const onMouseDownRect = (e: React.MouseEvent) => {
     if (!enabled) return;
     e.preventDefault();
     setDrag({ kind: 'move', startX: e.clientX, startY: e.clientY, roiStart: roi });
   };
+
   const onMouseDownHandle = (corner: string) => (e: React.MouseEvent) => {
     if (!enabled) return;
     e.preventDefault();
-    e.stopPropagation(); // ensure we don't trigger move
+    e.stopPropagation(); // do not also start move
     setDrag({ kind: 'resize', corner, startX: e.clientX, startY: e.clientY, roiStart: roi });
   };
 
-  // Drag logic uses live container size (correct deltas)
+  // Keyboard nudge
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+      e.preventDefault();
+      const el = containerRef.current!;
+      const w = el?.clientWidth || 1;
+      const h = el?.clientHeight || 1;
+      const dx = (e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0) / Math.max(1, w);
+      const dy = (e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0) / Math.max(1, h);
+      onChange({
+        ...roiRef.current,
+        x: clamp(roiRef.current.x + dx, 0, 1 - roiRef.current.width),
+        y: clamp(roiRef.current.y + dy, 0, 1 - roiRef.current.height),
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled, containerRef, onChange]);
+
+  // Drag logic
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const el = containerRef.current; if (!el) return;
@@ -59,9 +80,9 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
       } else if (drag.kind === 'resize') {
         const dx = (e.clientX - drag.startX) / w;
         const dy = (e.clientY - drag.startY) / h;
+
         const minSize = 0.03;
         const corner = drag.corner;
-
         let left = drag.roiStart.x;
         let right = drag.roiStart.x + drag.roiStart.width;
         let top = drag.roiStart.y;

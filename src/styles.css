@@ -129,21 +129,30 @@ video {
   display: block;
 }
 
-/* Make overlays interactive and on top */
 .video-wrap { position: relative; }
-.overlay-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
-.overlay-layer  { position: absolute; inset: 0; pointer-events: auto; z-index: 30; }
+
+.overlay-canvas { 
+  position: absolute; 
+  inset: 0; 
+  pointer-events: none; 
+  z-index: 20; 
+}
+
+.overlay-layer { 
+  position: absolute; 
+  inset: 0; 
+  pointer-events: auto; 
+  z-index: 30; 
+}
 
 .roi-rect {
   position: absolute;
-  /* percent-based placement so it's correct before measurements exist */
   border: 2px dashed var(--accent-2);
   background: var(--roi);
   pointer-events: auto;
   z-index: 40;
 }
 
-/* Larger, easier-to-grab handles */
 .roi-handle {
   position: absolute;
   width: 14px;
