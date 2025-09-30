@@ -71,6 +71,7 @@ export function useSequenceDetector(params: {
     return { canvas, ctx };
   }, []);
 
+  // Re-init when grid changes
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -78,12 +79,14 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1);
+    belowLow.current.fill(1); // IMPORTANT: allow first trigger without prior low
+
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;
     revealStartMs.current = null;
     inputStartMs.current = null;
+
     setState(s => ({
       ...s,
       steps: [],
@@ -145,7 +148,7 @@ export function useSequenceDetector(params: {
       deltaSmooth.current[i] = 0;
       hold.current[i] = 0;
       refractory.current[i] = 0;
-      belowLow.current[i] = 1;
+      belowLow.current[i] = 1; // armed after calibration
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -229,7 +232,6 @@ export function useSequenceDetector(params: {
           break;
 
         case 'rearming':
-          // ignore until re-armed
           break;
       }
 
@@ -261,6 +263,7 @@ export function useSequenceDetector(params: {
     }
   }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, config.clusterGapMs, state.phase, config.autoRoundDetect]);
 
+  // Input timeout → re-arm
   useEffect(() => {
     if (state.phase !== 'waiting-input') return;
     const t = window.setTimeout(() => {
@@ -279,6 +282,7 @@ export function useSequenceDetector(params: {
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
+  // Main sampling loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
@@ -324,19 +328,18 @@ export function useSequenceDetector(params: {
         const v = deltaSmooth.current[i];
 
         if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
-        if (belowLow.current[i] && v > thrHigh) {
+
+        // Use >= so borderline frames count; hold handles stability
+        if (belowLow.current[i] && v >= thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
           if (hold.current[i] >= holdFrames) {
-            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh), 0, 1);
-
+            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1); // slightly favor confirmed hits
             if (state.phase === 'idle' && config.autoRoundDetect) {
               setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
             }
-
-            // Confirmed flash
             pushStep(i, now, frameIndex, conf);
             refractory.current[i] = refractoryFrames;
-            belowLow.current[i] = 0;
+            belowLow.current[i] = 0; // require < thrLow to re-arm this cell
             hold.current[i] = 0;
           }
         }
@@ -364,6 +367,7 @@ export function useSequenceDetector(params: {
     state.running, state.frame, pushStep
   ]);
 
+  // Auto-arm at start
   useEffect(() => {
     if (state.running && config.autoRoundDetect && state.phase === 'idle') {
       arm();
