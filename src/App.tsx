@@ -15,7 +15,7 @@ export default function App() {
   const {
     difficulty, setDifficulty,
     rows, cols,
-    roi, setRoi,
+    roi, setRoi, resetRoiToDefault,
     config, setConfig,
     editRoi, setEditRoi
   } = useSettings();
@@ -23,9 +23,7 @@ export default function App() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const capturing = !!stream;
 
-  const detector = useSequenceDetector({
-    videoRef, roi, rows, cols, config
-  });
+  const detector = useSequenceDetector({ videoRef, roi, rows, cols, config });
 
   const startCapture = async () => {
     const media = await navigator.mediaDevices.getDisplayMedia({
@@ -39,7 +37,6 @@ export default function App() {
     }
     detector.setRunning(true);
   };
-
   const stopCapture = () => {
     detector.setRunning(false);
     setStream((s) => {
@@ -49,28 +46,18 @@ export default function App() {
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  // Keyboard shortcuts
+  // Shortcuts (optional quality-of-life)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.code === 'Space') {
-        e.preventDefault();
-        detector.setRunning(!detector.state.running);
-      } else if (e.key.toLowerCase() === 'c') {
-        e.preventDefault();
-        detector.calibrate();
-      } else if (e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        detector.reset();
-      } else if (e.key === 'Backspace') {
-        e.preventDefault();
-        detector.undo();
-      }
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); detector.setRunning(!detector.state.running); }
+      else if (e.key.toLowerCase() === 'c') { e.preventDefault(); detector.calibrate(); }
+      else if (e.key.toLowerCase() === 'r') { e.preventDefault(); detector.reset(); }
+      else if (e.key === 'Backspace') { e.preventDefault(); detector.undo(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detector]);
 
-  // Last detected cell for overlay highlight
   const lastHit = useMemo(() => {
     const s = detector.state.steps;
     if (!s.length) return null;
@@ -78,22 +65,18 @@ export default function App() {
     return { r: last.row, c: last.col };
   }, [detector.state.steps]);
 
-  const playingInfo = `Detected: ${detector.state.steps.length}`;
-
-  const resetRoi = () => setRoi({ x: 0.15, y: 0.15, width: 0.7, height: 0.7 });
+  const infoRight = `Round ${detector.state.roundIndex + 1} — phase: ${detector.state.phase}`;
 
   return (
     <div className="app">
       <div className="header">
         <h1>Zen Solver</h1>
-        <div className="small">Screen-based sequence detector for grid memory games</div>
+        <div className="small">Hands‑free grid memory sequence assistant</div>
         <div className="spacer" />
-        <div className="small">{playingInfo}</div>
+        <div className="small">{infoRight}</div>
       </div>
 
       <div className="left">
-        <div className="section-title">Controls</div>
-
         <CapturePanel
           capturing={capturing}
           onStartCapture={startCapture}
@@ -114,6 +97,7 @@ export default function App() {
           status={detector.state.status}
           editRoi={editRoi}
           setEditRoi={setEditRoi}
+          resetRoiToDefault={resetRoiToDefault}
         />
       </div>
 
@@ -152,8 +136,7 @@ export default function App() {
           <ul className="small" style={{ marginTop: 0 }}>
             <li>Align ROI tightly around the grid. Use Edit ROI and arrow keys to nudge.</li>
             <li>Calibrate while the board is idle before the round starts.</li>
-            <li>Raise thresholds or hold frames to reduce false positives.</li>
-            <li>Keep auto-reset on for Expert since tiles reshuffle each round.</li>
+            <li>Hands‑free mode captures the reveal, then waits for your input automatically.</li>
           </ul>
         </div>
       </div>

@@ -1,3 +1,4 @@
+// src/state/useSettings.ts
 import { useEffect, useMemo, useState } from 'react';
 import type { Difficulty, Rect, DetectorConfig } from '../types';
 
@@ -9,7 +10,6 @@ const editKey = `${LS_PREFIX}.editMode`;
 
 const DEFAULT_ROI: Rect = { x: 0.2, y: 0.2, width: 0.6, height: 0.6 };
 
-/* ---------- helpers ---------- */
 function readJSON<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(key);
@@ -19,14 +19,12 @@ function readJSON<T>(key: string, fallback: T): T {
   }
 }
 function writeJSON(key: string, v: any) {
-  try {
-    localStorage.setItem(key, JSON.stringify(v));
-  } catch {}
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
 }
 
-/* Keep ROI valid and visible even if stored values are bad */
+// Keep ROI in safe bounds and visible
 function sanitizeROI(r: Rect): Rect {
-  const min = 0.05; // 5% minimum width/height
+  const min = 0.05;
   let x = Math.min(Math.max(r.x, 0), 1);
   let y = Math.min(Math.max(r.y, 0), 1);
   let w = Math.min(Math.max(r.width, min), 1);
@@ -36,7 +34,6 @@ function sanitizeROI(r: Rect): Rect {
   return { x, y, width: w, height: h };
 }
 
-/* ---------- defaults & helpers exposed ---------- */
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
     thrHigh: 25,
@@ -48,28 +45,26 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
     appendAcrossRounds: d === 'expert' ? false : true,
     idleGapMs: 2000,
 
-    // Hands-free cycling defaults
+    // Hands‑free FSM defaults
     autoRoundDetect: true,
-    revealMaxISI: 550,     // system-driven flashes are usually brisk and consistent
-    clusterGapMs: 650,     // gap larger than this means "reveal finished"
-    inputTimeoutMs: 12000, // user gets up to 12s to re-enter
-    rearmDelayMs: 120      // small delay before next arm
+    revealMaxISI: 550,
+    clusterGapMs: 650,
+    inputTimeoutMs: 12000,
+    rearmDelayMs: 120
   };
 }
 
 export function gridForDifficulty(d: Difficulty): { rows: number; cols: number } {
   if (d === 'easy') return { rows: 4, cols: 4 };
   if (d === 'medium') return { rows: 5, cols: 5 };
-  return { rows: 6, cols: 6 }; // hard and expert
+  return { rows: 6, cols: 6 }; // hard & expert
 }
 
-/* ---------- main settings hook ---------- */
 export function useSettings() {
   const [difficulty, setDifficulty] = useState<Difficulty>(
     readJSON<Difficulty>(diffKey, 'expert')
   );
 
-  // ROI per difficulty, sanitized
   const [roiByDiff, setRoiByDiff] = useState<Record<Difficulty, Rect>>(() => ({
     easy: sanitizeROI(readJSON<Rect>(roiKey('easy'), DEFAULT_ROI)),
     medium: sanitizeROI(readJSON<Rect>(roiKey('medium'), DEFAULT_ROI)),
@@ -77,37 +72,31 @@ export function useSettings() {
     expert: sanitizeROI(readJSON<Rect>(roiKey('expert'), DEFAULT_ROI))
   }));
 
-  // Detector config (partly persisted)
   const [config, setConfig] = useState<DetectorConfig>(() => {
     const persisted = readJSON<Partial<DetectorConfig>>(cfgKey, {});
     const def = defaultConfigForDifficulty(difficulty);
-    const merged: DetectorConfig = {
-      ...def,
-      ...persisted
-    };
-    // If user never set these, apply difficulty defaults
-    if (persisted.appendAcrossRounds === undefined) {
-      merged.appendAcrossRounds = def.appendAcrossRounds;
-    }
-    if (persisted.useManualArm === undefined) {
-      merged.useManualArm = def.useManualArm;
-    }
+    const merged: DetectorConfig = { ...def, ...persisted };
+    if (persisted.appendAcrossRounds === undefined) merged.appendAcrossRounds = def.appendAcrossRounds;
+    if (persisted.autoRoundDetect === undefined) merged.autoRoundDetect = def.autoRoundDetect;
+    if (persisted.revealMaxISI === undefined) merged.revealMaxISI = def.revealMaxISI;
+    if (persisted.clusterGapMs === undefined) merged.clusterGapMs = def.clusterGapMs;
+    if (persisted.inputTimeoutMs === undefined) merged.inputTimeoutMs = def.inputTimeoutMs;
+    if (persisted.rearmDelayMs === undefined) merged.rearmDelayMs = def.rearmDelayMs;
     return merged;
   });
 
-  // When difficulty changes, align defaults if those settings weren't user‑overridden
+  // Sync difficulty-specific defaults when user hasn't overridden persisted values
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
       const def = defaultConfigForDifficulty(difficulty);
       const next = { ...prev };
       if (stored.appendAcrossRounds === undefined) next.appendAcrossRounds = def.appendAcrossRounds;
-      if (stored.useManualArm === undefined) next.useManualArm = def.useManualArm;
+      if (stored.autoRoundDetect === undefined) next.autoRoundDetect = def.autoRoundDetect;
       return next;
     });
   }, [difficulty]);
 
-  // Current ROI for the active difficulty
   const roi = roiByDiff[difficulty];
   const setRoi = (next: Rect) => {
     const clean = sanitizeROI(next);
@@ -118,17 +107,14 @@ export function useSettings() {
     });
   };
 
-  // Persist core values
   useEffect(() => writeJSON(diffKey, difficulty), [difficulty]);
   useEffect(() => writeJSON(cfgKey, config), [config]);
 
   const { rows, cols } = useMemo(() => gridForDifficulty(difficulty), [difficulty]);
 
-  // Edit-ROI toggle
   const [editRoi, setEditRoi] = useState<boolean>(readJSON<boolean>(editKey, true));
   useEffect(() => writeJSON(editKey, editRoi), [editRoi]);
 
-  // Optional helper to reset ROI (handy if something went wrong)
   const resetRoiToDefault = () => setRoi(DEFAULT_ROI);
 
   return {

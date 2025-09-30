@@ -1,3 +1,4 @@
+// src/components/CapturePanel.tsx
 import React, { useMemo, useState } from 'react';
 import type { DetectorConfig, Difficulty } from '../types';
 import { defaultConfigForDifficulty } from '../state/useSettings';
@@ -30,6 +31,8 @@ type Props = {
 
   editRoi: boolean;
   setEditRoi: (b: boolean) => void;
+
+  resetRoiToDefault?: () => void;
 };
 
 export default function CapturePanel({
@@ -39,10 +42,10 @@ export default function CapturePanel({
   difficulty, setDifficulty,
   config, setConfig, rows, cols,
   fps, status,
-  editRoi, setEditRoi
+  editRoi, setEditRoi,
+  resetRoiToDefault
 }: Props) {
   const [busy, setBusy] = useState(false);
-
   const onStartClick = async () => {
     setBusy(true);
     try { await onStartCapture(); } finally { setBusy(false); }
@@ -51,8 +54,8 @@ export default function CapturePanel({
   const onDiffChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const d = e.target.value as Difficulty;
     setDifficulty(d);
-    const base = defaultConfigForDifficulty(d);
-    setConfig({ ...config, appendAcrossRounds: base.appendAcrossRounds });
+    const def = defaultConfigForDifficulty(d);
+    setConfig({ ...config, appendAcrossRounds: def.appendAcrossRounds });
   };
 
   const set = (patch: Partial<DetectorConfig>) => setConfig({ ...config, ...patch });
@@ -92,38 +95,30 @@ export default function CapturePanel({
       </div>
 
       <div className="row" style={{ marginTop: 6 }}>
-        <label>Round start mode: Manual arm (N)</label>
-        <input
-          type="checkbox"
-          checked={config.useManualArm}
-          onChange={(e) => set({ useManualArm: e.target.checked })}
-        />
-      </div>
-
-      <div className="row" style={{ marginTop: 6 }}>
-        <button
-          onClick={() => {/* call from parent via prop? not available here */}}
-          disabled={!config.useManualArm}
-          className="primary"
-        >
-          Arm Next Round (N)
-        </button>
-        <div className="small">Press right before clicking “Train”. Sequence will reset on the first flash.</div>
-      </div>
-
-      <div className="row" style={{ marginTop: 6 }}>
         <label>Auto-reset between rounds</label>
         <input
           type="checkbox"
           checked={!config.appendAcrossRounds}
           onChange={(e) => set({ appendAcrossRounds: !e.target.checked })}
         />
-        <div className="small">Enabled by default for Expert; disables appending sequences across rounds.</div>
       </div>
 
       <div className="row" style={{ marginTop: 6 }}>
         <label>Edit ROI</label>
         <input type="checkbox" checked={editRoi} onChange={(e) => setEditRoi(e.target.checked)} />
+        {resetRoiToDefault && (
+          <button style={{ marginLeft: 8 }} onClick={resetRoiToDefault}>Reset ROI</button>
+        )}
+      </div>
+
+      <div className="row" style={{ marginTop: 6 }}>
+        <label>Hands-free rounds</label>
+        <input
+          type="checkbox"
+          checked={config.autoRoundDetect}
+          onChange={(e) => set({ autoRoundDetect: e.target.checked })}
+        />
+        <div className="small">Capture reveal, wait for input, auto re-arm—no hotkeys.</div>
       </div>
 
       <div className="row wrap" style={{ marginTop: 6 }}>
@@ -143,6 +138,17 @@ export default function CapturePanel({
         <input type="range" min={800} max={4000} step={100} value={config.idleGapMs} onChange={(e) => set({ idleGapMs: Number(e.target.value) })} />
       </div>
 
+      <div className="row wrap" style={{ marginTop: 6 }}>
+        <label className="grow">Reveal Max ISI (ms): {config.revealMaxISI}</label>
+        <input type="range" min={300} max={900} step={10} value={config.revealMaxISI} onChange={(e) => set({ revealMaxISI: Number(e.target.value) })} />
+        <label className="grow">Reveal→Input Gap (ms): {config.clusterGapMs}</label>
+        <input type="range" min={450} max={1000} step={10} value={config.clusterGapMs} onChange={(e) => set({ clusterGapMs: Number(e.target.value) })} />
+        <label className="grow">Input Timeout (ms): {config.inputTimeoutMs}</label>
+        <input type="range" min={4000} max={20000} step={500} value={config.inputTimeoutMs} onChange={(e) => set({ inputTimeoutMs: Number(e.target.value) })} />
+        <label className="grow">Re-arm Delay (ms): {config.rearmDelayMs}</label>
+        <input type="range" min={0} max={500} step={10} value={config.rearmDelayMs} onChange={(e) => set({ rearmDelayMs: Number(e.target.value) })} />
+      </div>
+
       <hr className="sep" />
 
       <div className="section-title">Sequence Control</div>
@@ -152,14 +158,6 @@ export default function CapturePanel({
       </div>
 
       <hr className="sep" />
-      <div className="small">
-        Shortcuts:
-        <span className="kbd" style={{ marginLeft: 6 }}>Space</span> start/stop
-        <span className="kbd" style={{ marginLeft: 6 }}>C</span> calibrate
-        <span className="kbd" style={{ marginLeft: 6 }}>R</span> reset
-        <span className="kbd" style={{ marginLeft: 6 }}>Backspace</span> undo
-      </div>
-
       <div className="row" style={{ marginTop: 8 }}>
         <div className="small">Status: {status}</div>
         <div className="spacer" />

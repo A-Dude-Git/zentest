@@ -1,10 +1,11 @@
+// src/components/RectSelector.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Rect } from '../types';
 import { clamp } from '../lib/detector';
 
 type Props = {
   containerRef: React.RefObject<HTMLElement>;
-  roi: Rect; // normalized 0..1
+  roi: Rect;
   onChange: (r: Rect) => void;
   enabled: boolean;
 };
@@ -20,7 +21,6 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
   const [drag, setDrag] = useState<DragState>({ kind: 'none' });
   const roiRef = useRef(roi); roiRef.current = roi;
 
-  // Percent-based style so it renders correctly before container measures
   const style = useMemo(() => ({
     left: `${roi.x * 100}%`,
     top: `${roi.y * 100}%`,
@@ -33,36 +33,13 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
     e.preventDefault();
     setDrag({ kind: 'move', startX: e.clientX, startY: e.clientY, roiStart: roi });
   };
-
   const onMouseDownHandle = (corner: string) => (e: React.MouseEvent) => {
     if (!enabled) return;
     e.preventDefault();
-    e.stopPropagation(); // do not also start move
+    e.stopPropagation();
     setDrag({ kind: 'resize', corner, startX: e.clientX, startY: e.clientY, roiStart: roi });
   };
 
-  // Keyboard nudge
-  useEffect(() => {
-    if (!enabled) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
-      e.preventDefault();
-      const el = containerRef.current!;
-      const w = el?.clientWidth || 1;
-      const h = el?.clientHeight || 1;
-      const dx = (e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0) / Math.max(1, w);
-      const dy = (e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0) / Math.max(1, h);
-      onChange({
-        ...roiRef.current,
-        x: clamp(roiRef.current.x + dx, 0, 1 - roiRef.current.width),
-        y: clamp(roiRef.current.y + dy, 0, 1 - roiRef.current.height),
-      });
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [enabled, containerRef, onChange]);
-
-  // Drag logic
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const el = containerRef.current; if (!el) return;
@@ -80,9 +57,9 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
       } else if (drag.kind === 'resize') {
         const dx = (e.clientX - drag.startX) / w;
         const dy = (e.clientY - drag.startY) / h;
-
-        const minSize = 0.03;
+        const min = 0.03;
         const corner = drag.corner;
+
         let left = drag.roiStart.x;
         let right = drag.roiStart.x + drag.roiStart.width;
         let top = drag.roiStart.y;
@@ -98,13 +75,13 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
         top = clamp(top, 0, 1);
         bottom = clamp(bottom, 0, 1);
 
-        if (right - left < minSize) { if (corner.includes('w')) left = right - minSize; else right = left + minSize; }
-        if (bottom - top < minSize) { if (corner.includes('n')) top = bottom - minSize; else bottom = top + minSize; }
+        if (right - left < min) { if (corner.includes('w')) left = right - min; else right = left + min; }
+        if (bottom - top < min) { if (corner.includes('n')) top = bottom - min; else bottom = top + min; }
 
-        const x = clamp(Math.min(left, right), 0, 1 - minSize);
-        const y = clamp(Math.min(top, bottom), 0, 1 - minSize);
-        const width = clamp(Math.abs(right - left), minSize, 1 - x);
-        const height = clamp(Math.abs(bottom - top), minSize, 1 - y);
+        const x = clamp(Math.min(left, right), 0, 1 - min);
+        const y = clamp(Math.min(top, bottom), 0, 1 - min);
+        const width = clamp(Math.abs(right - left), min, 1 - x);
+        const height = clamp(Math.abs(bottom - top), min, 1 - y);
 
         onChange({ x, y, width, height });
       }
@@ -123,7 +100,7 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
   return (
     <div className="overlay-layer">
       <div className="roi-rect" style={style} onMouseDown={onMouseDownRect}>
-        {HANDLES.map((c) => (
+        {HANDLES.map(c => (
           <div key={c} className="roi-handle" data-corner={c} onMouseDown={onMouseDownHandle(c)} />
         ))}
       </div>

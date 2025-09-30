@@ -1,6 +1,6 @@
+// src/lib/detector.ts
 import type { Rect } from '../types';
 
-/** Compute luminance Y from RGB (Rec. 709) */
 export function luminance(r: number, g: number, b: number): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
@@ -26,10 +26,7 @@ export function normToDisplayRect(roi: Rect, w: number, h: number) {
   return { x: roi.x * w, y: roi.y * h, width: roi.width * w, height: roi.height * h };
 }
 
-/**
- * Sample average luminance per grid cell.
- * Draws ROI into a downscaled offscreen canvas and averages with inner padding.
- */
+/** Downsample ROI and return per-cell average luminance with inner padding */
 export function sampleGridLuminance(
   video: HTMLVideoElement,
   roi: Rect,
@@ -68,13 +65,13 @@ export function sampleGridLuminance(
   const lums: number[] = new Array(rows * cols).fill(0);
   const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 8));
 
-  for (let rIndex = 0; rIndex < rows; rIndex++) {
-    const y0 = Math.floor(rIndex * cellH + padY);
-    const y1 = Math.ceil((rIndex + 1) * cellH - padY);
-    for (let cIndex = 0; cIndex < cols; cIndex++) {
-      const idx = rIndex * cols + cIndex;
-      const x0 = Math.floor(cIndex * cellW + padX);
-      const x1 = Math.ceil((cIndex + 1) * cellW - padX);
+  for (let rI = 0; rI < rows; rI++) {
+    const y0 = Math.floor(rI * cellH + padY);
+    const y1 = Math.ceil((rI + 1) * cellH - padY);
+    for (let cI = 0; cI < cols; cI++) {
+      const idx = rI * cols + cI;
+      const x0 = Math.floor(cI * cellW + padX);
+      const x1 = Math.ceil((cI + 1) * cellW - padX);
 
       let sum = 0, cnt = 0;
       for (let y = y0; y < y1; y += step) {
