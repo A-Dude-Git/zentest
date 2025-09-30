@@ -78,6 +78,7 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
+    belowLow.current.fill(1);
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;

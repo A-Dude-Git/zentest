@@ -25,18 +25,31 @@ export default function App() {
 
   const detector = useSequenceDetector({ videoRef, roi, rows, cols, config });
 
+  // Start capture → auto-calibrate while idle → start detector (hands-free)
   const startCapture = async () => {
     const media = await navigator.mediaDevices.getDisplayMedia({
       video: { cursor: 'always' },
       audio: false
     } as any);
+
     setStream(media);
     if (videoRef.current) {
       videoRef.current.srcObject = media;
+      // Ensure the video is playing and producing frames
       await videoRef.current.play().catch(() => {});
+      // Give the video a frame or two to render before calibrating
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
     }
+
+    // Calibrate on idle board (before clicking Train)
+    detector.setRunning(false);
+    await detector.calibrate();
+
+    // Start detection; in hands-free mode the FSM will auto-arm on first flash
     detector.setRunning(true);
   };
+
   const stopCapture = () => {
     detector.setRunning(false);
     setStream((s) => {
@@ -46,18 +59,28 @@ export default function App() {
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  // Shortcuts (optional quality-of-life)
+  // Keyboard shortcuts (optional QoL; not required during play)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); detector.setRunning(!detector.state.running); }
-      else if (e.key.toLowerCase() === 'c') { e.preventDefault(); detector.calibrate(); }
-      else if (e.key.toLowerCase() === 'r') { e.preventDefault(); detector.reset(); }
-      else if (e.key === 'Backspace') { e.preventDefault(); detector.undo(); }
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        detector.setRunning(!detector.state.running);
+      } else if (e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        detector.calibrate();
+      } else if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        detector.reset();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        detector.undo();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detector]);
 
+  // For overlay: last confirmed hit
   const lastHit = useMemo(() => {
     const s = detector.state.steps;
     if (!s.length) return null;
@@ -65,7 +88,8 @@ export default function App() {
     return { r: last.row, c: last.col };
   }, [detector.state.steps]);
 
-  const infoRight = `Round ${detector.state.roundIndex + 1} — phase: ${detector.state.phase}`;
+  const infoRight = `Round ${detector.state.roundIndex + 1} — ${detector.state.phase} — ` +
+                    `reveal ${detector.state.revealLen}, input ${detector.state.inputProgress}/${Math.max(1, detector.state.revealLen)}`;
 
   return (
     <div className="app">
@@ -134,9 +158,9 @@ export default function App() {
         <div>
           <div className="section-title">Tips</div>
           <ul className="small" style={{ marginTop: 0 }}>
-            <li>Align ROI tightly around the grid. Use Edit ROI and arrow keys to nudge.</li>
-            <li>Calibrate while the board is idle before the round starts.</li>
-            <li>Hands‑free mode captures the reveal, then waits for your input automatically.</li>
+            <li>Start Capture, set ROI, then Calibrate once while the board is idle.</li>
+            <li>Click Train in the game. The app auto-captures the reveal, waits for your input, and re‑arms.</li>
+            <li>If detections are noisy, raise High Threshold or Hold Frames; if misses occur, lower them slightly.</li>
           </ul>
         </div>
       </div>
