@@ -169,10 +169,19 @@ export function useSequenceDetector(params: {
         if (belowLow.current[i] && v > thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
           if (hold.current[i] >= holdFrames) {
-            const gapOk = lastStepMs.current !== null && now - lastStepMs.current > config.idleGapMs;
-            if (!config.appendAcrossRounds && gapOk) {
-              setState(s => ({ ...s, steps: [], activeIndex: null }));
-            }
+            let shouldReset = false;
+              if (!config.appendAcrossRounds) {
+                if (config.useManualArm) {
+                  shouldReset = armedForNewRound.current;
+                } else {
+                  const gapOk = lastStepMs.current !== null && now - lastStepMs.current > config.idleGapMs;
+                  shouldReset = gapOk;
+                }
+              }
+              if (shouldReset) {
+                setState(s => ({ ...s, steps: [], activeIndex: null }));
+                armedForNewRound.current = false;
+              }
             const conf = clamp((v - thrHigh) / Math.max(1, thrHigh), 0, 1);
             pushStep(i, now, frameIndex, conf);
             refractory.current[i] = refractoryFrames;
@@ -209,4 +218,17 @@ export function useSequenceDetector(params: {
     start, stop, reset, undo, calibrate,
     setRunning: (v: boolean) => (v ? start() : stop())
   };
+
+const armedForNewRound = useRef<boolean>(false);
+const armNewRound = useCallback(() => {
+  armedForNewRound.current = true;
+  setState(s => ({ ...s, status: 'armed' }));
+}, []);
+
+return {
+  state,
+  start, stop, reset, undo, calibrate,
+  setRunning: (v: boolean) => (v ? start() : stop()),
+  armNewRound // NEW
+};
 }

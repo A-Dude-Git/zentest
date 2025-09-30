@@ -61,11 +61,13 @@ export default function RectSelector({ containerRef, roi, onChange, enabled }: P
     setDrag({ kind: 'move', startX: e.clientX, startY: e.clientY, roiStart: roi });
   };
 
-  const onMouseDownHandle = (corner: string) => (e: React.MouseEvent) => {
-    if (!enabled) return;
-    e.preventDefault();
-    setDrag({ kind: 'resize', corner, startX: e.clientX, startY: e.clientY, roiStart: roi });
-  };
+  // inside RectSelector.tsx
+const onMouseDownHandle = (corner: string) => (e: React.MouseEvent) => {
+  if (!enabled) return;
+  e.preventDefault();
+  e.stopPropagation(); // <-- critical: don't let parent 'move' handler run
+  setDrag({ kind: 'resize', corner, startX: e.clientX, startY: e.clientY, roiStart: roi });
+};
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {

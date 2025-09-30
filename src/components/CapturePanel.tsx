@@ -92,6 +92,29 @@ export default function CapturePanel({
       </div>
 
       <div className="row" style={{ marginTop: 6 }}>
+        <label>Round start mode: Manual arm (N)</label>
+        <input
+          type="checkbox"
+          checked={config.useManualArm}
+          onChange={(e) => set({ useManualArm: e.target.checked })}
+        />
+        <button
+          onClick={() => setRunning(true) || undefined}
+          style={{ display: 'none' }}
+        />
+      </div>
+      <div className="row" style={{ marginTop: 6 }}>
+        <button
+          onClick={() => {/* call from parent via prop? not available here */}}
+          disabled={!config.useManualArm}
+          className="primary"
+        >
+          Arm Next Round (N)
+        </button>
+        <div className="small">Press right before clicking “Train”. Sequence will reset on the first flash.</div>
+      </div>
+
+      <div className="row" style={{ marginTop: 6 }}>
         <label>Auto-reset between rounds</label>
         <input
           type="checkbox"

@@ -9,8 +9,9 @@ export type DetectorConfig = {
   refractoryFrames: number;
   paddingPct: number;
   emaAlpha: number;
-  appendAcrossRounds: boolean; // if false, auto-reset between rounds based on idle gap
+  appendAcrossRounds: boolean;
   idleGapMs: number;
+  useManualArm: boolean; // NEW: if true, reset on “arm” then first flash
 };
 
 export type Step = {

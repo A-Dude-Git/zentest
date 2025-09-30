@@ -141,12 +141,15 @@ video {
   background: var(--roi);
   pointer-events: auto;
 }
+/* Increase hit area and raise above the ROI box */
 .roi-handle {
   position: absolute;
-  width: 10px; height: 10px;
-  border-radius: 2px;
+  width: 14px;       /* was 10px */
+  height: 14px;      /* was 10px */
+  border-radius: 3px;
   background: var(--accent-2);
   border: 1px solid #00000066;
+  z-index: 2;
 }
 .roi-handle[data-corner="nw"] { left: -6px; top: -6px; cursor: nwse-resize; }
 .roi-handle[data-corner="ne"] { right: -6px; top: -6px; cursor: nesw-resize; }

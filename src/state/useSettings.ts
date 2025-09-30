@@ -30,7 +30,8 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
     paddingPct: 12,
     emaAlpha: 0.12,
     appendAcrossRounds: d === 'expert' ? false : true,
-    idleGapMs: 2000
+    idleGapMs: 2000,
+    useManualArm: d === 'expert' ? true : false // NEW
   };
 }
 
