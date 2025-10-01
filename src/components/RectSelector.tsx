@@ -5,7 +5,7 @@ import { clamp } from '../lib/detector';
 
 type Props = {
   containerRef: React.RefObject<HTMLElement>;
-  roi: Rect;
+  roi: Rect; // normalized 0..1
   onChange: (r: Rect) => void;
   enabled: boolean;
 };

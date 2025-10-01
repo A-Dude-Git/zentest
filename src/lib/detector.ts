@@ -1,7 +1,6 @@
 // src/lib/detector.ts
 import type { Rect } from '../types';
 
-/** Luminance Y (Rec. 709) */
 export function luminance(r: number, g: number, b: number): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
@@ -27,7 +26,7 @@ export function normToDisplayRect(roi: Rect, w: number, h: number) {
   return { x: roi.x * w, y: roi.y * h, width: roi.width * w, height: roi.height * h };
 }
 
-/** Downsample ROI and return per‑cell average luminance with inner padding. */
+/** Per-cell average luminance inside ROI (with inner padding) */
 export function sampleGridLuminance(
   video: HTMLVideoElement,
   roi: Rect,
@@ -42,7 +41,7 @@ export function sampleGridLuminance(
 
   const r = normToVideoRect(roi, vw, vh);
 
-  const maxSide = 480; // slightly higher for more detail
+  const maxSide = 480;
   let dw = r.width, dh = r.height;
   if (Math.max(dw, dh) > maxSide) {
     const s = maxSide / Math.max(dw, dh);
@@ -64,7 +63,7 @@ export function sampleGridLuminance(
   const padY = (paddingPct / 100) * cellH * 0.5;
 
   const lums: number[] = new Array(rows * cols).fill(0);
-  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10)); // denser sampling
+  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10)); // denser
 
   for (let rI = 0; rI < rows; rI++) {
     const y0 = Math.floor(rI * cellH + padY);
@@ -89,8 +88,7 @@ export function sampleGridLuminance(
   return lums;
 }
 
-/* ---------- Color helpers for gating teal/green tiles ---------- */
-
+/* ---------- Color helpers ---------- */
 export function hexToRgb(hex: string) {
   const s = hex.replace('#', '');
   const full = s.length === 3 ? s.split('').map(c => c + c).join('') : s;
@@ -117,10 +115,7 @@ export function hueDistDeg(a: number, b: number) {
   return d > 180 ? 360 - d : d;
 }
 
-/**
- * For each cell, compute the fraction of sampled pixels close to the
- * reveal and input colors. Fractions are in 0..1.
- */
+/** Per-cell fraction of pixels close to teal (reveal) and green (input) */
 export function sampleGridColorFractions(
   video: HTMLVideoElement,
   roi: Rect,
@@ -132,8 +127,8 @@ export function sampleGridColorFractions(
     revealRgb: { r: number; g: number; b: number };
     inputRgb: { r: number; g: number; b: number };
     hueTolDeg: number;
-    satMin: number; // 0..1
-    valMin: number; // 0..1
+    satMin: number;
+    valMin: number;
   }
 ): { revealFrac: number[]; inputFrac: number[] } {
   const vw = video.videoWidth || 0;
@@ -145,7 +140,7 @@ export function sampleGridColorFractions(
 
   const r = normToVideoRect(roi, vw, vh);
 
-  const maxSide = 480; // match luminance path
+  const maxSide = 480;
   let dw = r.width, dh = r.height;
   if (Math.max(dw, dh) > maxSide) {
     const s = maxSide / Math.max(dw, dh);
@@ -172,7 +167,7 @@ export function sampleGridColorFractions(
   const revealFrac: number[] = new Array(rows * cols).fill(0);
   const inputFrac: number[] = new Array(rows * cols).fill(0);
 
-  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10)); // denser sampling
+  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10));
 
   for (let rI = 0; rI < rows; rI++) {
     const y0 = Math.floor(rI * cellH + padY);

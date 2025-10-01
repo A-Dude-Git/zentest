@@ -7,6 +7,7 @@ const roiKey = (d: Difficulty) => `${LS_PREFIX}.roi.${d}`;
 const cfgKey = `${LS_PREFIX}.config`;
 const diffKey = `${LS_PREFIX}.difficulty`;
 const editKey = `${LS_PREFIX}.editMode`;
+const advKey = `${LS_PREFIX}.showAdvanced`;
 
 const DEFAULT_ROI: Rect = { x: 0.2, y: 0.2, width: 0.6, height: 0.6 };
 
@@ -22,7 +23,6 @@ function writeJSON(key: string, v: any) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
 }
 
-// Keep ROI in safe bounds and visible
 function sanitizeROI(r: Rect): Rect {
   const min = 0.05;
   let x = Math.min(Math.max(r.x, 0), 1);
@@ -36,34 +36,34 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
-    // detection
-    thrHigh: 25,
-    thrLow: 12,
-    holdFrames: 3,
-    refractoryFrames: 8,
-    paddingPct: 12,
-    emaAlpha: 0.12,
+    // Core detection (good defaults)
+    thrHigh: 12,
+    thrLow: 6,
+    holdFrames: 2,
+    refractoryFrames: 6,
+    paddingPct: 14,
+    emaAlpha: 0.2,
 
-    // per‑round
+    // Round behavior
     appendAcrossRounds: d === 'expert' ? false : true,
     idleGapMs: 2000,
 
-    // hands‑free FSM
+    // Hands-free FSM
     autoRoundDetect: true,
-    revealMaxISI: 550,
-    clusterGapMs: 650,
+    revealMaxISI: 600,
+    clusterGapMs: 800,
     inputTimeoutMs: 12000,
-    rearmDelayMs: 120,
+    rearmDelayMs: 100,
 
-    // color gate (teal reveal, green input)
-    colorGateEnabled: true,
+    // Color gate (OFF by default to guarantee first-run success)
+    colorGateEnabled: false,
     colorRevealHex: '#1aa085',
     colorInputHex: '#27ad61',
-    colorHueTol: 18,
-    colorSatMin: 0.35,
-    colorValMin: 0.35,
-    colorMinFracReveal: 0.03,
-    colorMinFracInput: 0.03
+    colorHueTol: 30,
+    colorSatMin: 0.2,
+    colorValMin: 0.2,
+    colorMinFracReveal: 0.005,
+    colorMinFracInput: 0.005
   };
 }
 
@@ -89,16 +89,25 @@ export function useSettings() {
     const persisted = readJSON<Partial<DetectorConfig>>(cfgKey, {});
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
+
+    // Respect difficulty defaults if not user-overridden
     if (persisted.appendAcrossRounds === undefined) merged.appendAcrossRounds = def.appendAcrossRounds;
     if (persisted.autoRoundDetect === undefined) merged.autoRoundDetect = def.autoRoundDetect;
-    if (persisted.revealMaxISI === undefined) merged.revealMaxISI = def.revealMaxISI;
-    if (persisted.clusterGapMs === undefined) merged.clusterGapMs = def.clusterGapMs;
-    if (persisted.inputTimeoutMs === undefined) merged.inputTimeoutMs = def.inputTimeoutMs;
-    if (persisted.rearmDelayMs === undefined) merged.rearmDelayMs = def.rearmDelayMs;
+
+    // Ensure all new color fields exist
+    merged.colorGateEnabled ??= def.colorGateEnabled;
+    merged.colorRevealHex ??= def.colorRevealHex;
+    merged.colorInputHex ??= def.colorInputHex;
+    merged.colorHueTol ??= def.colorHueTol;
+    merged.colorSatMin ??= def.colorSatMin;
+    merged.colorValMin ??= def.colorValMin;
+    merged.colorMinFracReveal ??= def.colorMinFracReveal;
+    merged.colorMinFracInput ??= def.colorMinFracInput;
+
     return merged;
   });
 
-  // Sync difficulty-specific defaults when user hasn't overridden persisted values
+  // Align difficulty-dependent defaults if not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
@@ -128,6 +137,10 @@ export function useSettings() {
   const [editRoi, setEditRoi] = useState<boolean>(readJSON<boolean>(editKey, true));
   useEffect(() => writeJSON(editKey, editRoi), [editRoi]);
 
+  // Simple vs Advanced UI toggle (persisted)
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(readJSON<boolean>(advKey, false));
+  useEffect(() => writeJSON(advKey, showAdvanced), [showAdvanced]);
+
   const resetRoiToDefault = () => setRoi(DEFAULT_ROI);
 
   return {
@@ -135,6 +148,7 @@ export function useSettings() {
     rows, cols,
     roi, setRoi, resetRoiToDefault,
     config, setConfig,
-    editRoi, setEditRoi
+    editRoi, setEditRoi,
+    showAdvanced, setShowAdvanced
   };
 }

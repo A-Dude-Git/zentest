@@ -61,10 +61,6 @@ export function useSequenceDetector(params: {
   const refractory = useRef<Uint8Array>(new Uint8Array(N));
   const belowLow = useRef<Uint8Array>(new Uint8Array(N));
 
-  // Color fraction (previous frame) for rising-edge gating
-  const prevRevealFrac = useRef<Float32Array>(new Float32Array(N));
-  const prevInputFrac = useRef<Float32Array>(new Float32Array(N));
-
   // FSM trackers
   const lastEventMs = useRef<number | null>(null);
   const revealStartMs = useRef<number | null>(null);
@@ -72,14 +68,14 @@ export function useSequenceDetector(params: {
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
 
-  // Scratch canvas
+  // Scratch
   const scratch = useMemo(() => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     return { canvas, ctx };
   }, []);
 
-  // Reset arrays on grid change
+  // Reset state/arrays on grid change
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -87,9 +83,7 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1); // allow first trigger without prior low
-    prevRevealFrac.current = new Float32Array(n);
-    prevInputFrac.current = new Float32Array(n);
+    belowLow.current.fill(1); // allow first detection without prior low
 
     revealIndices.current = [];
     inputCount.current = 0;
@@ -159,8 +153,6 @@ export function useSequenceDetector(params: {
       hold.current[i] = 0;
       refractory.current[i] = 0;
       belowLow.current[i] = 1; // armed post-calibration
-      prevRevealFrac.current[i] = 0;
-      prevInputFrac.current[i] = 0;
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -189,7 +181,6 @@ export function useSequenceDetector(params: {
       activeIndex: s.steps.length
     }));
 
-    // FSM bookkeeping
     const now = ts;
     const last = lastEventMs.current;
     lastEventMs.current = now;
@@ -251,7 +242,7 @@ export function useSequenceDetector(params: {
       return { ...s, phase, revealLen, inputProgress, status, roundIndex };
     });
 
-    // When user completed N taps → clear (if configured) and re-arm
+    // Completed input → re-arm
     if (state.phase === 'waiting-input') {
       const expected = revealIndices.current.length;
       const curr = inputCount.current;
@@ -296,7 +287,7 @@ export function useSequenceDetector(params: {
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main detection loop
+  // Main loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
@@ -314,10 +305,10 @@ export function useSequenceDetector(params: {
         return;
       }
 
-      // Base luminance
+      // Luminance sampling
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
-      // Color fractions (for teal reveal / green input)
+      // Optional color fractions
       const color = config.colorGateEnabled
         ? sampleGridColorFractions(
             video,
@@ -334,9 +325,9 @@ export function useSequenceDetector(params: {
               valMin: config.colorValMin
             }
           )
-        : { revealFrac: new Array(rows * cols).fill(0), inputFrac: new Array(rows * cols).fill(0) };
+        : { revealFrac: new Array(rows * cols).fill(1), inputFrac: new Array(rows * cols).fill(1) }; // pass-through when disabled
 
-      // Baseline EMA and deltas
+      // Baseline and deltas
       const count = rows * cols;
       const deltas = new Array<number>(count);
       const alpha = clamp(config.emaAlpha, 0.01, 0.99);
@@ -346,7 +337,6 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
-      // Remove global drift
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -361,24 +351,17 @@ export function useSequenceDetector(params: {
       const { thrHigh, thrLow, holdFrames, refractoryFrames } = config;
       const frameIndex = (state.frame || 0) + 1;
 
-      // Color rising-edge threshold (avoid constant colored UI)
-      const colorRiseMin = 0.01; // 1% of samples increase
-
       for (let i = 0; i < count; i++) {
         if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
         const v = deltaSmooth.current[i];
 
         if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
-        // Color gate: phase-sensitive fraction + rising edge
-        let gatePass = true;
-        if (config.colorGateEnabled) {
-          const isInputPhase = state.phase === 'waiting-input';
-          const frac = isInputPhase ? color.inputFrac[i] : color.revealFrac[i];
-          const prev = isInputPhase ? prevInputFrac.current[i] : prevRevealFrac.current[i];
-          const minFrac = isInputPhase ? config.colorMinFracInput : config.colorMinFracReveal;
-          gatePass = frac >= minFrac && (frac - prev) >= colorRiseMin;
-        }
+        // Color gate based on phase (pass-through when disabled)
+        const isInputPhase = state.phase === 'waiting-input';
+        const frac = isInputPhase ? color.inputFrac[i] : color.revealFrac[i];
+        const minFrac = isInputPhase ? config.colorMinFracInput : config.colorMinFracReveal;
+        const gatePass = frac >= minFrac;
 
         if (gatePass && belowLow.current[i] && v >= thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
@@ -387,23 +370,13 @@ export function useSequenceDetector(params: {
             if (state.phase === 'idle' && config.autoRoundDetect) {
               setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
             }
-            // Confirmed detection
             pushStep(i, now, frameIndex, conf);
             refractory.current[i] = refractoryFrames;
             belowLow.current[i] = 0;
             hold.current[i] = 0;
           }
         } else {
-          // if color gate fails, don't accumulate hold
           if (!gatePass) hold.current[i] = 0;
-        }
-      }
-
-      // Store previous color fractions for next frame's rising-edge check
-      if (config.colorGateEnabled) {
-        for (let i = 0; i < count; i++) {
-          prevRevealFrac.current[i] = color.revealFrac[i];
-          prevInputFrac.current[i] = color.inputFrac[i];
         }
       }
 

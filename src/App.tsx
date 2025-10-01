@@ -17,7 +17,8 @@ export default function App() {
     rows, cols,
     roi, setRoi, resetRoiToDefault,
     config, setConfig,
-    editRoi, setEditRoi
+    editRoi, setEditRoi,
+    showAdvanced, setShowAdvanced
   } = useSettings();
 
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -25,62 +26,42 @@ export default function App() {
 
   const detector = useSequenceDetector({ videoRef, roi, rows, cols, config });
 
-  // Start capture → auto-calibrate while idle → start detector (hands-free)
   const startCapture = async () => {
     const media = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'never' },
+      video: { cursor: 'never' }, // hide cursor to avoid false positives
       audio: false
     } as any);
-
     setStream(media);
     if (videoRef.current) {
       videoRef.current.srcObject = media;
-      // Ensure the video is playing and producing frames
       await videoRef.current.play().catch(() => {});
-      // Give the video a frame or two to render before calibrating
+      // Give it a couple frames before calibrating
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
     }
-
-    // Calibrate on idle board (before clicking Train)
     detector.setRunning(false);
-    await detector.calibrate();
-
-    // Start detection; in hands-free mode the FSM will auto-arm on first flash
-    detector.setRunning(true);
+    await detector.calibrate(); // board idle here (before Train)
+    detector.setRunning(true);  // hands-free from now on
   };
 
   const stopCapture = () => {
     detector.setRunning(false);
-    setStream((s) => {
-      s?.getTracks().forEach(t => t.stop());
-      return null;
-    });
+    setStream(s => { s?.getTracks().forEach(t => t.stop()); return null; });
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  // Keyboard shortcuts (optional QoL; not required during play)
+  // Optional hotkeys (not required during play)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.code === 'Space') {
-        e.preventDefault();
-        detector.setRunning(!detector.state.running);
-      } else if (e.key.toLowerCase() === 'c') {
-        e.preventDefault();
-        detector.calibrate();
-      } else if (e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        detector.reset();
-      } else if (e.key === 'Backspace') {
-        e.preventDefault();
-        detector.undo();
-      }
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); detector.setRunning(!detector.state.running); }
+      else if (e.key.toLowerCase() === 'c') { e.preventDefault(); detector.calibrate(); }
+      else if (e.key.toLowerCase() === 'r') { e.preventDefault(); detector.reset(); }
+      else if (e.key === 'Backspace') { e.preventDefault(); /* undo hidden in simple mode */ }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detector]);
 
-  // For overlay: last confirmed hit
   const lastHit = useMemo(() => {
     const s = detector.state.steps;
     if (!s.length) return null;
@@ -95,7 +76,7 @@ export default function App() {
     <div className="app">
       <div className="header">
         <h1>Zen Solver</h1>
-        <div className="small">Hands‑free grid memory sequence assistant</div>
+        <div className="small">Hands‑free grid sequence assistant</div>
         <div className="spacer" />
         <div className="small">{infoRight}</div>
       </div>
@@ -122,6 +103,8 @@ export default function App() {
           editRoi={editRoi}
           setEditRoi={setEditRoi}
           resetRoiToDefault={resetRoiToDefault}
+          showAdvanced={showAdvanced}
+          setShowAdvanced={setShowAdvanced}
         />
       </div>
 
@@ -129,14 +112,18 @@ export default function App() {
         <div className="section-title">Screen Preview</div>
         <div className="video-wrap" ref={wrapRef}>
           <video ref={videoRef} autoPlay muted playsInline />
+          {/* status chip */}
           <div style={{
             position: 'absolute', top: 8, left: 8, zIndex: 50,
-            background: 'rgba(0,0,0,0.5)', padding: '6px 10px', borderRadius: 8, fontSize: 12
+            background: 'rgba(0,0,0,0.55)', padding: '6px 10px',
+            borderRadius: 8, fontSize: 12
           }}>
             {detector.state.phase === 'reveal' && `Reveal: ${detector.state.revealLen}`}
             {detector.state.phase === 'waiting-input' && `Input: ${detector.state.inputProgress}/${detector.state.revealLen}`}
             {detector.state.phase === 'rearming' && '✓ Next round…'}
+            {(detector.state.phase === 'armed' || detector.state.phase === 'idle') && 'Ready'}
           </div>
+
           <GridOverlay
             containerRef={wrapRef}
             roi={roi}
@@ -160,15 +147,15 @@ export default function App() {
           rows={rows}
           cols={cols}
           steps={detector.state.steps}
-          onUndo={detector.undo}
+          revealLen={detector.state.revealLen}
           onReset={detector.reset}
         />
         <div>
           <div className="section-title">Tips</div>
           <ul className="small" style={{ marginTop: 0 }}>
-            <li>Start Capture, set ROI, then Calibrate once while the board is idle.</li>
-            <li>Click Train in the game. The app auto-captures the reveal, waits for your input, and re‑arms.</li>
-            <li>If detections are noisy, raise High Threshold or Hold Frames; if misses occur, lower them slightly.</li>
+            <li>Start Capture, align ROI, Calibrate while the board is idle, then click Train in-game.</li>
+            <li>The pattern updates live during the reveal; repeat it in-game. Next round arms automatically.</li>
+            <li>For tough lighting, switch to Advanced and enable Color Gate.</li>
           </ul>
         </div>
       </div>

@@ -1,51 +1,46 @@
 // src/types.ts
 
-// Normalized rectangle (0..1 in both axes)
 export type Rect = { x: number; y: number; width: number; height: number };
 
-// Difficulties
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 
-// Hands‑free round FSM phases
 export type Phase = 'idle' | 'armed' | 'reveal' | 'waiting-input' | 'rearming';
 
-// Detector/runtime configuration
 export type DetectorConfig = {
-  // Detection signal tuning
+  // Detection
   thrHigh: number;
   thrLow: number;
   holdFrames: number;
   refractoryFrames: number;
-  paddingPct: number;  // inner padding % per cell to avoid borders
-  emaAlpha: number;    // 0..1, smoothing
+  paddingPct: number;  // inner padding % per cell
+  emaAlpha: number;    // 0..1
 
-  // Round behavior
-  appendAcrossRounds: boolean; // if false, clear steps between rounds (good for Expert)
-  idleGapMs: number;           // legacy gap detector (kept for compatibility)
+  // Per-round behavior
+  appendAcrossRounds: boolean; // if false, clear steps each new round
+  idleGapMs: number;
 
-  // Hands‑free round cycling
-  autoRoundDetect: boolean; // auto-arm and cycle rounds without user hotkeys
-  revealMaxISI: number;     // ms: max inter-flash gap still considered part of reveal
-  clusterGapMs: number;     // ms: gap that ends reveal and starts waiting for input
-  inputTimeoutMs: number;   // ms: max time to wait for user to finish input
-  rearmDelayMs: number;     // ms: small delay before arming next round
+  // Hands-free FSM
+  autoRoundDetect: boolean;
+  revealMaxISI: number;     // ms: max gap inside reveal
+  clusterGapMs: number;     // ms: gap that ends reveal and starts input
+  inputTimeoutMs: number;   // ms: fail-safe while waiting input
+  rearmDelayMs: number;     // ms: small delay before next arm
 
-  // Color gating
+  // Color gate (optional)
   colorGateEnabled: boolean;
-  colorRevealHex: string; // '#1aa085'
-  colorInputHex: string;  // '#27ad61'
-  colorHueTol: number;    // degrees, e.g., 18
-  colorSatMin: number;    // 0..1, e.g., 0.35
-  colorValMin: number;    // 0..1, e.g., 0.35
-  colorMinFracReveal: number; // 0..1, e.g., 0.03
-  colorMinFracInput: number;  // 0..1, e.g., 0.03
+  colorRevealHex: string;   // teal ≈ #1aa085
+  colorInputHex: string;    // green ≈ #27ad61
+  colorHueTol: number;      // deg
+  colorSatMin: number;      // 0..1
+  colorValMin: number;      // 0..1
+  colorMinFracReveal: number; // 0..1
+  colorMinFracInput: number;  // 0..1
 };
 
-// One confirmed flash/tap
 export type Step = {
-  row: number;      // 0-based
-  col: number;      // 0-based
-  frame: number;    // rAF frame index
-  t: number;        // timestamp (ms)
-  confidence: number; // 0..1
+  row: number;
+  col: number;
+  frame: number;
+  t: number;           // ms timestamp
+  confidence: number;  // 0..1
 };

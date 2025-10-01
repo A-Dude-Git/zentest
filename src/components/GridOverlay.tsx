@@ -30,19 +30,22 @@ export default function GridOverlay({
     cvs.height = Math.round(h * dpr);
     cvs.style.width = `${w}px`;
     cvs.style.height = `${h}px`;
-
     const ctx = cvs.getContext('2d')!;
     ctx.clearRect(0, 0, cvs.width, cvs.height);
-    ctx.save(); ctx.scale(dpr, dpr);
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
     const R = normToDisplayRect(roi, w, h);
 
+    // ROI outline
     ctx.strokeStyle = 'rgba(245,166,35,0.7)';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(R.x, R.y, R.width, R.height);
     ctx.setLineDash([]);
 
+    // Grid lines
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 1;
     for (let r = 1; r < rows; r++) {
