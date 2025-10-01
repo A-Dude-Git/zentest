@@ -20,10 +20,12 @@ type DetectorState = {
   frame: number;
   phase: Phase;
   roundIndex: number;
-  revealLen: number;
-  inputProgress: number;
+  revealLen: number;     // how many steps belong to the reveal (prefix of steps[])
+  inputProgress: number; // 0..N while waiting-input
   status: string;
 };
+
+type EventKind = 'reveal' | 'input';
 
 export function useSequenceDetector(params: {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -63,19 +65,17 @@ export function useSequenceDetector(params: {
 
   // FSM trackers
   const lastEventMs = useRef<number | null>(null);
-  const revealStartMs = useRef<number | null>(null);
-  const inputStartMs = useRef<number | null>(null);
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
 
-  // Scratch
+  // Scratch canvas
   const scratch = useMemo(() => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     return { canvas, ctx };
   }, []);
 
-  // Reset state/arrays on grid change
+  // Reset when grid changes
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -83,13 +83,10 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1); // allow first detection without prior low
-
+    belowLow.current.fill(1); // allow first trigger without prior low
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;
-    revealStartMs.current = null;
-    inputStartMs.current = null;
 
     setState(s => ({
       ...s,
@@ -109,8 +106,6 @@ export function useSequenceDetector(params: {
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;
-    revealStartMs.current = null;
-    inputStartMs.current = null;
     setState(s => ({
       ...s,
       steps: [],
@@ -152,7 +147,7 @@ export function useSequenceDetector(params: {
       deltaSmooth.current[i] = 0;
       hold.current[i] = 0;
       refractory.current[i] = 0;
-      belowLow.current[i] = 1; // armed post-calibration
+      belowLow.current[i] = 1; // armed after calibration
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -160,8 +155,6 @@ export function useSequenceDetector(params: {
   const arm = useCallback(() => {
     revealIndices.current = [];
     inputCount.current = 0;
-    revealStartMs.current = null;
-    inputStartMs.current = null;
     setState(s => ({
       ...s,
       phase: 'armed',
@@ -171,10 +164,11 @@ export function useSequenceDetector(params: {
     }));
   }, []);
 
-  const pushStep = useCallback((cellIdx: number, ts: number, frame: number, conf: number) => {
+  const pushStep = useCallback((cellIdx: number, ts: number, frame: number, conf: number, kind: EventKind) => {
     const r = Math.floor(cellIdx / cols);
     const c = cellIdx % cols;
 
+    // Append raw step
     setState(s => ({
       ...s,
       steps: [...s.steps, { row: r, col: c, t: ts, frame, confidence: conf }],
@@ -185,7 +179,7 @@ export function useSequenceDetector(params: {
     const last = lastEventMs.current;
     lastEventMs.current = now;
     const isi = last ? now - last : Infinity;
-    const { revealMaxISI, clusterGapMs } = config;
+    const { revealMaxISI } = config;
 
     setState(s => {
       let phase: Phase = s.phase;
@@ -198,34 +192,34 @@ export function useSequenceDetector(params: {
         case 'idle':
           if (config.autoRoundDetect) { phase = 'armed'; status = 'armed'; }
         // fallthrough
-        case 'armed':
+        case 'armed': {
+          // Start reveal on first event (even if mis-tagged, treat start as reveal)
           phase = 'reveal';
           revealIndices.current = [cellIdx];
-          revealStartMs.current = now;
-          inputCount.current = 0;
           revealLen = 1;
           status = 'reveal:1';
           break;
+        }
 
-        case 'reveal':
-          if (isi <= Math.max(revealMaxISI, 200)) {
-            revealIndices.current.push(cellIdx);
-            revealLen = revealIndices.current.length;
-            status = `reveal:${revealLen}`;
-          } else if (isi > clusterGapMs) {
+        case 'reveal': {
+          // If event is clearly input (green), flip immediately to waiting-input
+          // Otherwise, if time gap too large, also flip to waiting-input
+          const isInputEvent = kind === 'input';
+          if (isInputEvent || isi > revealMaxISI) {
             phase = 'waiting-input';
-            inputStartMs.current = now;
             inputCount.current = 1;
             inputProgress = 1;
             status = `input:1/${revealIndices.current.length}`;
           } else {
+            // Still part of reveal
             revealIndices.current.push(cellIdx);
             revealLen = revealIndices.current.length;
             status = `reveal:${revealLen}`;
           }
           break;
+        }
 
-        case 'waiting-input':
+        case 'waiting-input': {
           inputCount.current += 1;
           inputProgress = inputCount.current;
           status = `input:${inputProgress}/${revealIndices.current.length}`;
@@ -234,15 +228,17 @@ export function useSequenceDetector(params: {
             status = 'rearming';
           }
           break;
+        }
 
         case 'rearming':
+          // ignore until we re-arm
           break;
       }
 
       return { ...s, phase, revealLen, inputProgress, status, roundIndex };
     });
 
-    // Completed input → re-arm
+    // After state change: if finished input, clear if needed and re-arm
     if (state.phase === 'waiting-input') {
       const expected = revealIndices.current.length;
       const curr = inputCount.current;
@@ -261,14 +257,12 @@ export function useSequenceDetector(params: {
           }));
           revealIndices.current = [];
           inputCount.current = 0;
-          revealStartMs.current = null;
-          inputStartMs.current = null;
         }, Math.max(0, config.rearmDelayMs));
       }
     }
-  }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, config.clusterGapMs, state.phase, config.autoRoundDetect]);
+  }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, state.phase, config.autoRoundDetect]);
 
-  // Input timeout → re-arm anyway
+  // Failsafe: if user takes too long during input, re-arm anyway
   useEffect(() => {
     if (state.phase !== 'waiting-input') return;
     const t = window.setTimeout(() => {
@@ -281,22 +275,18 @@ export function useSequenceDetector(params: {
       }));
       revealIndices.current = [];
       inputCount.current = 0;
-      revealStartMs.current = null;
-      inputStartMs.current = null;
     }, Math.max(2000, config.inputTimeoutMs));
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main loop
+  // Main sampling loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
       const dt = now - lastTick.current;
       lastTick.current = now;
       const instFps = dt > 0 ? 1000 / dt : 0;
-      fpsSmoothed.current = fpsSmoothed.current
-        ? fpsSmoothed.current * 0.9 + instFps * 0.1
-        : instFps;
+      fpsSmoothed.current = fpsSmoothed.current ? fpsSmoothed.current * 0.9 + instFps * 0.1 : instFps;
 
       const video = videoRef.current;
       if (!video || !state.running) {
@@ -305,29 +295,21 @@ export function useSequenceDetector(params: {
         return;
       }
 
-      // Luminance sampling
+      // Luminance across grid
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
-      // Optional color fractions
-      const color = config.colorGateEnabled
-        ? sampleGridColorFractions(
-            video,
-            roi,
-            rows,
-            cols,
-            config.paddingPct,
-            scratch,
-            {
-              revealRgb: hexToRgb(config.colorRevealHex),
-              inputRgb: hexToRgb(config.colorInputHex),
-              hueTolDeg: config.colorHueTol,
-              satMin: config.colorSatMin,
-              valMin: config.colorValMin
-            }
-          )
-        : { revealFrac: new Array(rows * cols).fill(1), inputFrac: new Array(rows * cols).fill(1) }; // pass-through when disabled
+      // Color fractions (teal reveal, green input)
+      const color = sampleGridColorFractions(
+        video, roi, rows, cols, config.paddingPct, scratch, {
+          revealRgb: hexToRgb(config.colorRevealHex),
+          inputRgb:  hexToRgb(config.colorInputHex),
+          hueTolDeg: config.colorHueTol,
+          satMin:    config.colorSatMin,
+          valMin:    config.colorValMin
+        }
+      );
 
-      // Baseline and deltas
+      // EMA baseline + deltas
       const count = rows * cols;
       const deltas = new Array<number>(count);
       const alpha = clamp(config.emaAlpha, 0.01, 0.99);
@@ -337,6 +319,7 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
+      // Remove global drift (median)
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -357,26 +340,43 @@ export function useSequenceDetector(params: {
 
         if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
-        // Color gate based on phase (pass-through when disabled)
-        const isInputPhase = state.phase === 'waiting-input';
-        const frac = isInputPhase ? color.inputFrac[i] : color.revealFrac[i];
-        const minFrac = isInputPhase ? config.colorMinFracInput : config.colorMinFracReveal;
-        const gatePass = frac >= minFrac;
+        // Determine color match for this cell
+        const fracReveal = color.revealFrac[i];
+        const fracInput  = color.inputFrac[i];
+        const matchReveal = !config.colorGateEnabled || fracReveal >= config.colorMinFracReveal;
+        const matchInput  = !config.colorGateEnabled || fracInput  >= config.colorMinFracInput;
 
-        if (gatePass && belowLow.current[i] && v >= thrHigh) {
+        // Require at least one color match when gating is enabled
+        const passesColor = config.colorGateEnabled ? (matchReveal || matchInput) : true;
+
+        if (passesColor && belowLow.current[i] && v >= thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
           if (hold.current[i] >= holdFrames) {
+            // Tag the event kind by color. If both match, prefer based on phase.
+            let kind: EventKind;
+            if (config.colorGateEnabled) {
+              if (matchInput && !matchReveal) kind = 'input';
+              else if (matchReveal && !matchInput) kind = 'reveal';
+              else if (matchInput && matchReveal) kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+              else kind = (state.phase === 'waiting-input' ? 'input' : 'reveal'); // fallback
+            } else {
+              kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+            }
+
             const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1);
             if (state.phase === 'idle' && config.autoRoundDetect) {
               setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
             }
-            pushStep(i, now, frameIndex, conf);
+
+            // Confirmed detection
+            pushStep(i, now, frameIndex, conf, kind);
             refractory.current[i] = refractoryFrames;
             belowLow.current[i] = 0;
             hold.current[i] = 0;
           }
         } else {
-          if (!gatePass) hold.current[i] = 0;
+          // No color / below threshold: don't accumulate hold
+          if (!passesColor) hold.current[i] = 0;
         }
       }
 
@@ -406,7 +406,7 @@ export function useSequenceDetector(params: {
     state.running, state.frame, state.phase, pushStep
   ]);
 
-  // Auto-arm once when running starts
+  // Auto-arm at start
   useEffect(() => {
     if (state.running && config.autoRoundDetect && state.phase === 'idle') {
       arm();

@@ -36,7 +36,7 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
-    // Core detection (good defaults)
+    // Core detection (stable defaults)
     thrHigh: 12,
     thrLow: 6,
     holdFrames: 2,
@@ -50,20 +50,20 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
 
     // Hands-free FSM
     autoRoundDetect: true,
-    revealMaxISI: 600,
-    clusterGapMs: 800,
+    revealMaxISI: 520,   // used only as a soft guard; color decides first
+    clusterGapMs: 700,   // retained for compatibility (not relied on)
     inputTimeoutMs: 12000,
     rearmDelayMs: 100,
 
-    // Color gate (OFF by default to guarantee first-run success)
-    colorGateEnabled: false,
-    colorRevealHex: '#1aa085',
-    colorInputHex: '#27ad61',
-    colorHueTol: 30,
-    colorSatMin: 0.2,
-    colorValMin: 0.2,
-    colorMinFracReveal: 0.005,
-    colorMinFracInput: 0.005
+    // Color gate ON by default (permissive + robust)
+    colorGateEnabled: true,
+    colorRevealHex: '#1aa085', // teal reveal
+    colorInputHex:  '#27ad61', // green input
+    colorHueTol: 40,           // wide tolerance to handle tone-mapping
+    colorSatMin: 0.15,
+    colorValMin: 0.15,
+    colorMinFracReveal: 0.002, // 0.2% of sampled pixels is enough
+    colorMinFracInput:  0.002
   };
 }
 
@@ -90,11 +90,10 @@ export function useSettings() {
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
 
-    // Respect difficulty defaults if not user-overridden
-    if (persisted.appendAcrossRounds === undefined) merged.appendAcrossRounds = def.appendAcrossRounds;
-    if (persisted.autoRoundDetect === undefined) merged.autoRoundDetect = def.autoRoundDetect;
+    // Ensure required fields (esp. color)
+    merged.appendAcrossRounds ??= def.appendAcrossRounds;
+    merged.autoRoundDetect ??= def.autoRoundDetect;
 
-    // Ensure all new color fields exist
     merged.colorGateEnabled ??= def.colorGateEnabled;
     merged.colorRevealHex ??= def.colorRevealHex;
     merged.colorInputHex ??= def.colorInputHex;
@@ -104,10 +103,15 @@ export function useSettings() {
     merged.colorMinFracReveal ??= def.colorMinFracReveal;
     merged.colorMinFracInput ??= def.colorMinFracInput;
 
+    merged.revealMaxISI ??= def.revealMaxISI;
+    merged.clusterGapMs ??= def.clusterGapMs;
+    merged.inputTimeoutMs ??= def.inputTimeoutMs;
+    merged.rearmDelayMs ??= def.rearmDelayMs;
+
     return merged;
   });
 
-  // Align difficulty-dependent defaults if not overridden
+  // Align difficulty-dependent defaults when not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
@@ -137,7 +141,7 @@ export function useSettings() {
   const [editRoi, setEditRoi] = useState<boolean>(readJSON<boolean>(editKey, true));
   useEffect(() => writeJSON(editKey, editRoi), [editRoi]);
 
-  // Simple vs Advanced UI toggle (persisted)
+  // Simple vs Advanced toggle (persisted)
   const [showAdvanced, setShowAdvanced] = useState<boolean>(readJSON<boolean>(advKey, false));
   useEffect(() => writeJSON(advKey, showAdvanced), [showAdvanced]);
 
