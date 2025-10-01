@@ -27,9 +27,7 @@ export function normToDisplayRect(roi: Rect, w: number, h: number) {
   return { x: roi.x * w, y: roi.y * h, width: roi.width * w, height: roi.height * h };
 }
 
-/**
- * Downsample the ROI and return per‑cell average luminance with inner padding.
- */
+/** Downsample ROI and return per‑cell average luminance with inner padding. */
 export function sampleGridLuminance(
   video: HTMLVideoElement,
   roi: Rect,
@@ -44,7 +42,7 @@ export function sampleGridLuminance(
 
   const r = normToVideoRect(roi, vw, vh);
 
-  const maxSide = 420;
+  const maxSide = 480; // slightly higher for more detail
   let dw = r.width, dh = r.height;
   if (Math.max(dw, dh) > maxSide) {
     const s = maxSide / Math.max(dw, dh);
@@ -66,7 +64,7 @@ export function sampleGridLuminance(
   const padY = (paddingPct / 100) * cellH * 0.5;
 
   const lums: number[] = new Array(rows * cols).fill(0);
-  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 8));
+  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10)); // denser sampling
 
   for (let rI = 0; rI < rows; rI++) {
     const y0 = Math.floor(rI * cellH + padY);
@@ -147,7 +145,7 @@ export function sampleGridColorFractions(
 
   const r = normToVideoRect(roi, vw, vh);
 
-  const maxSide = 420;
+  const maxSide = 480; // match luminance path
   let dw = r.width, dh = r.height;
   if (Math.max(dw, dh) > maxSide) {
     const s = maxSide / Math.max(dw, dh);
@@ -174,7 +172,7 @@ export function sampleGridColorFractions(
   const revealFrac: number[] = new Array(rows * cols).fill(0);
   const inputFrac: number[] = new Array(rows * cols).fill(0);
 
-  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 8));
+  const step = Math.max(1, Math.floor(Math.min(cellW, cellH) / 10)); // denser sampling
 
   for (let rI = 0; rI < rows; rI++) {
     const y0 = Math.floor(rI * cellH + padY);

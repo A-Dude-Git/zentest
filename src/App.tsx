@@ -129,6 +129,14 @@ export default function App() {
         <div className="section-title">Screen Preview</div>
         <div className="video-wrap" ref={wrapRef}>
           <video ref={videoRef} autoPlay muted playsInline />
+          <div style={{
+            position: 'absolute', top: 8, left: 8, zIndex: 50,
+            background: 'rgba(0,0,0,0.5)', padding: '6px 10px', borderRadius: 8, fontSize: 12
+          }}>
+            {detector.state.phase === 'reveal' && `Reveal: ${detector.state.revealLen}`}
+            {detector.state.phase === 'waiting-input' && `Input: ${detector.state.inputProgress}/${detector.state.revealLen}`}
+            {detector.state.phase === 'rearming' && '✓ Next round…'}
+          </div>
           <GridOverlay
             containerRef={wrapRef}
             roi={roi}
