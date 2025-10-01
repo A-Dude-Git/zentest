@@ -50,10 +50,10 @@ export default function CapturePanel({
   showAdvanced, setShowAdvanced
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const onStartClick = async () => {
-    setBusy(true);
-    try { await onStartCapture(); } finally { setBusy(false); }
-  };
+  const set = (patch: Partial<DetectorConfig>) => setConfig({ ...config, ...patch });
+  const gridLabel = useMemo(() => `${rows} × ${cols}`, [rows, cols]);
+
+  const onStartClick = async () => { setBusy(true); try { await onStartCapture(); } finally { setBusy(false); } };
 
   const onDiffChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const d = e.target.value as Difficulty;
@@ -61,9 +61,6 @@ export default function CapturePanel({
     const def = defaultConfigForDifficulty(d);
     setConfig({ ...config, appendAcrossRounds: def.appendAcrossRounds });
   };
-
-  const set = (patch: Partial<DetectorConfig>) => setConfig({ ...config, ...patch });
-  const gridLabel = useMemo(() => `${rows} × ${cols}`, [rows, cols]);
 
   const restoreDefaults = () => {
     const def = defaultConfigForDifficulty(difficulty);
@@ -164,65 +161,105 @@ export default function CapturePanel({
             />
           </div>
 
-          <div className="row wrap" style={{ marginTop: 6 }}>
-            <label className="grow">High Threshold: {config.thrHigh.toFixed(0)}</label>
+          <hr className="sep" />
+          <div className="section-title">Detection</div>
+          <div className="form-grid">
+            <div className="label">High Threshold</div>
+            <div className="value">{config.thrHigh.toFixed(0)}</div>
             <input type="range" min={5} max={80} step={1} value={config.thrHigh} onChange={(e) => set({ thrHigh: Number(e.target.value) })} />
-            <label className="grow">Low Threshold: {config.thrLow.toFixed(0)}</label>
+
+            <div className="label">Low Threshold</div>
+            <div className="value">{config.thrLow.toFixed(0)}</div>
             <input type="range" min={2} max={60} step={1} value={config.thrLow} onChange={(e) => set({ thrLow: Number(e.target.value) })} />
-            <label className="grow">Hold Frames: {config.holdFrames}</label>
+
+            <div className="label">Hold Frames</div>
+            <div className="value">{config.holdFrames}</div>
             <input type="range" min={1} max={8} step={1} value={config.holdFrames} onChange={(e) => set({ holdFrames: Number(e.target.value) })} />
-            <label className="grow">Refractory Frames: {config.refractoryFrames}</label>
+
+            <div className="label">Refractory Frames</div>
+            <div className="value">{config.refractoryFrames}</div>
             <input type="range" min={0} max={20} step={1} value={config.refractoryFrames} onChange={(e) => set({ refractoryFrames: Number(e.target.value) })} />
-            <label className="grow">EMA α: {config.emaAlpha.toFixed(2)}</label>
+
+            <div className="label">EMA α</div>
+            <div className="value">{config.emaAlpha.toFixed(2)}</div>
             <input type="range" min={0.05} max={0.5} step={0.01} value={config.emaAlpha} onChange={(e) => set({ emaAlpha: Number(e.target.value) })} />
-            <label className="grow">Padding %: {config.paddingPct.toFixed(0)}%</label>
+
+            <div className="label">Padding %</div>
+            <div className="value">{config.paddingPct.toFixed(0)}%</div>
             <input type="range" min={0} max={30} step={1} value={config.paddingPct} onChange={(e) => set({ paddingPct: Number(e.target.value) })} />
           </div>
 
-          <div className="row wrap" style={{ marginTop: 6 }}>
-            <label className="grow">Reveal Max ISI (ms): {config.revealMaxISI}</label>
+          <div className="form-grid" style={{ marginTop: 8 }}>
+            <div className="label">Reveal Max ISI (ms)</div>
+            <div className="value">{config.revealMaxISI}</div>
             <input type="range" min={300} max={1200} step={10} value={config.revealMaxISI} onChange={(e) => set({ revealMaxISI: Number(e.target.value) })} />
-            <label className="grow">Reveal→Input Gap (ms): {config.clusterGapMs}</label>
+
+            <div className="label">Reveal→Input Gap (ms)</div>
+            <div className="value">{config.clusterGapMs}</div>
             <input type="range" min={450} max={1500} step={10} value={config.clusterGapMs} onChange={(e) => set({ clusterGapMs: Number(e.target.value) })} />
-            <label className="grow">Input Timeout (ms): {config.inputTimeoutMs}</label>
+
+            <div className="label">Input Timeout (ms)</div>
+            <div className="value">{config.inputTimeoutMs}</div>
             <input type="range" min={4000} max={20000} step={500} value={config.inputTimeoutMs} onChange={(e) => set({ inputTimeoutMs: Number(e.target.value) })} />
-            <label className="grow">Re-arm Delay (ms): {config.rearmDelayMs}</label>
+
+            <div className="label">Re-arm Delay (ms)</div>
+            <div className="value">{config.rearmDelayMs}</div>
             <input type="range" min={0} max={500} step={10} value={config.rearmDelayMs} onChange={(e) => set({ rearmDelayMs: Number(e.target.value) })} />
+          </div>
+
+          <hr className="sep" />
+          <div className="section-title">Known sequence length</div>
+          <div className="form-grid">
+            <div className="label">Use expected length</div>
+            <div className="value">{config.useExpectedRevealLen ? 'On' : 'Off'}</div>
+            <input
+              type="range" min={0} max={1} step={1}
+              value={config.useExpectedRevealLen ? 1 : 0}
+              onChange={(e) => set({ useExpectedRevealLen: Number(e.target.value) === 1 })}
+            />
+
+            <div className="label">Initial length (Round 1)</div>
+            <div className="value">{config.initialRevealLen}</div>
+            <input type="range" min={3} max={6} step={1} value={config.initialRevealLen} onChange={(e) => set({ initialRevealLen: Number(e.target.value) })} />
+
+            <div className="label">Reveal hard timeout (ms)</div>
+            <div className="value">{config.revealHardTimeoutMs}</div>
+            <input type="range" min={800} max={2500} step={50} value={config.revealHardTimeoutMs} onChange={(e) => set({ revealHardTimeoutMs: Number(e.target.value) })} />
           </div>
 
           <hr className="sep" />
           <div className="section-title">Quick‑flash boost</div>
           <div className="row">
             <label>Enable</label>
-            <input
-              type="checkbox"
-              checked={config.quickFlashEnabled}
-              onChange={(e) => set({ quickFlashEnabled: e.target.checked })}
-            />
-            <div className="small">Catches ultra‑short flashes by summing signal over ~{config.energyWindow} frames.</div>
+            <input type="checkbox" checked={config.quickFlashEnabled} onChange={(e) => set({ quickFlashEnabled: e.target.checked })} />
           </div>
 
           <hr className="sep" />
-          <div className="section-title">Color gate (teal reveal • green input)</div>
+          <div className="section-title">Color gate</div>
           <div className="row">
             <label>Enable</label>
-            <input
-              type="checkbox"
-              checked={config.colorGateEnabled}
-              onChange={(e) => set({ colorGateEnabled: e.target.checked })}
-            />
+            <input type="checkbox" checked={config.colorGateEnabled} onChange={(e) => set({ colorGateEnabled: e.target.checked })} />
           </div>
           {config.colorGateEnabled && (
-            <div className="row wrap" style={{ marginTop: 6 }}>
-              <label className="grow">Hue tolerance (°): {config.colorHueTol}</label>
+            <div className="form-grid" style={{ marginTop: 8 }}>
+              <div className="label">Hue tolerance (°)</div>
+              <div className="value">{config.colorHueTol}</div>
               <input type="range" min={8} max={60} step={1} value={config.colorHueTol} onChange={(e) => set({ colorHueTol: Number(e.target.value) })} />
-              <label className="grow">Saturation min: {config.colorSatMin.toFixed(2)}</label>
+
+              <div className="label">Saturation min</div>
+              <div className="value">{config.colorSatMin.toFixed(2)}</div>
               <input type="range" min={0} max={1} step={0.01} value={config.colorSatMin} onChange={(e) => set({ colorSatMin: Number(e.target.value) })} />
-              <label className="grow">Value min: {config.colorValMin.toFixed(2)}</label>
+
+              <div className="label">Value min</div>
+              <div className="value">{config.colorValMin.toFixed(2)}</div>
               <input type="range" min={0} max={1} step={0.01} value={config.colorValMin} onChange={(e) => set({ colorValMin: Number(e.target.value) })} />
-              <label className="grow">Min tile area (reveal): {(config.colorMinFracReveal * 100).toFixed(2)}%</label>
+
+              <div className="label">Min tile area (reveal)</div>
+              <div className="value">{(config.colorMinFracReveal*100).toFixed(2)}%</div>
               <input type="range" min={0} max={0.05} step={0.001} value={config.colorMinFracReveal} onChange={(e) => set({ colorMinFracReveal: Number(e.target.value) })} />
-              <label className="grow">Min tile area (input): {(config.colorMinFracInput * 100).toFixed(2)}%</label>
+
+              <div className="label">Min tile area (input)</div>
+              <div className="value">{(config.colorMinFracInput*100).toFixed(2)}%</div>
               <input type="range" min={0} max={0.05} step={0.001} value={config.colorMinFracInput} onChange={(e) => set({ colorMinFracInput: Number(e.target.value) })} />
             </div>
           )}
