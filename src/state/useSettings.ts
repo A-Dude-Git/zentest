@@ -22,7 +22,6 @@ function readJSON<T>(key: string, fallback: T): T {
 function writeJSON(key: string, v: any) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
 }
-
 function sanitizeROI(r: Rect): Rect {
   const min = 0.05;
   let x = Math.min(Math.max(r.x, 0), 1);
@@ -36,38 +35,38 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
-    // Core detection (stable defaults)
-    thrHigh: 12,
+    // Detection core (what worked for you)
+    thrHigh: 10,
     thrLow: 6,
-    holdFrames: 2,
+    holdFrames: 1,
     refractoryFrames: 8,
-    paddingPct: 14,
+    paddingPct: 16,
     emaAlpha: 0.20,
 
-    // Quick‑flash boost
-    quickFlashEnabled: true,
+    // Quick‑flash boost (kept simple off by default now)
+    quickFlashEnabled: false,
     energyWindow: 5,
-    energyScale: 3.0, // energyThr ≈ (thrHigh - thrLow) * energyScale
+    energyScale: 3.0,
 
-    // Round behavior
-    appendAcrossRounds: d === 'expert' ? false : true,
+    // Per‑round behavior
+    appendAcrossRounds: false,  // always clear pattern when next round starts
     idleGapMs: 2000,
 
     // Hands‑free FSM
     autoRoundDetect: true,
-    revealMaxISI: 600,
-    clusterGapMs: 800,
+    revealMaxISI: 900,    // allow fast but also slightly spaced reveals
+    clusterGapMs: 900,    // gap that signals reveal ended if no input color seen
     inputTimeoutMs: 12000,
     rearmDelayMs: 120,
 
-    // Color gate OFF by default (turn on later if needed)
-    colorGateEnabled: false,
-    colorRevealHex: '#1aa085',
-    colorInputHex:  '#27ad61',
+    // Color gate (ON by default per your best results)
+    colorGateEnabled: true,
+    colorRevealHex: '#1aa085', // teal (reveal)
+    colorInputHex:  '#27ad61', // green (player input)
     colorHueTol: 40,
     colorSatMin: 0.15,
     colorValMin: 0.15,
-    colorMinFracReveal: 0.002, // 0.2%
+    colorMinFracReveal: 0.002, // 0.2% area
     colorMinFracInput:  0.002
   };
 }
@@ -95,7 +94,7 @@ export function useSettings() {
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
 
-    // Ensure newly added fields exist
+    // Make sure all fields exist (for users upgrading)
     merged.quickFlashEnabled ??= def.quickFlashEnabled;
     merged.energyWindow ??= def.energyWindow;
     merged.energyScale ??= def.energyScale;
@@ -120,7 +119,7 @@ export function useSettings() {
     return merged;
   });
 
-  // Align difficulty-dependent defaults if not overridden
+  // Keep difficulty-linked defaults if not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
