@@ -36,21 +36,34 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
+    // detection
     thrHigh: 25,
     thrLow: 12,
     holdFrames: 3,
     refractoryFrames: 8,
     paddingPct: 12,
     emaAlpha: 0.12,
+
+    // per‑round
     appendAcrossRounds: d === 'expert' ? false : true,
     idleGapMs: 2000,
 
-    // Hands‑free FSM defaults
+    // hands‑free FSM
     autoRoundDetect: true,
     revealMaxISI: 550,
     clusterGapMs: 650,
     inputTimeoutMs: 12000,
-    rearmDelayMs: 120
+    rearmDelayMs: 120,
+
+    // color gate (teal reveal, green input)
+    colorGateEnabled: true,
+    colorRevealHex: '#1aa085',
+    colorInputHex: '#27ad61',
+    colorHueTol: 18,
+    colorSatMin: 0.35,
+    colorValMin: 0.35,
+    colorMinFracReveal: 0.03,
+    colorMinFracInput: 0.03
   };
 }
 

@@ -1,7 +1,13 @@
 // src/hooks/useSequenceDetector.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectorConfig, Step, Rect, Phase } from '../types';
-import { clamp, median, sampleGridLuminance } from '../lib/detector';
+import {
+  clamp,
+  median,
+  sampleGridLuminance,
+  sampleGridColorFractions,
+  hexToRgb
+} from '../lib/detector';
 
 type DetectorState = {
   running: boolean;
@@ -59,19 +65,21 @@ export function useSequenceDetector(params: {
   const refractory = useRef<Uint8Array>(new Uint8Array(N));
   const belowLow = useRef<Uint8Array>(new Uint8Array(N));
 
+  // FSM trackers
   const lastEventMs = useRef<number | null>(null);
   const revealStartMs = useRef<number | null>(null);
   const inputStartMs = useRef<number | null>(null);
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
 
+  // Scratch canvas
   const scratch = useMemo(() => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     return { canvas, ctx };
   }, []);
 
-  // Re-init when grid changes
+  // Reset arrays on grid change
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -79,7 +87,7 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1); // IMPORTANT: allow first trigger without prior low
+    belowLow.current.fill(1); // allow first trigger without prior low
 
     revealIndices.current = [];
     inputCount.current = 0;
@@ -127,7 +135,7 @@ export function useSequenceDetector(params: {
   }, []);
 
   const start = useCallback(() => setState(s => ({ ...s, running: true, status: 'running' })), []);
-  const stop  = useCallback(() => setState(s => ({ ...s, running: false, status: 'paused' })), []);
+  const stop = useCallback(() => setState(s => ({ ...s, running: false, status: 'paused' })), []);
 
   const calibrate = useCallback(async () => {
     setState(s => ({ ...s, calibrating: true, status: 'calibrating' }));
@@ -148,7 +156,7 @@ export function useSequenceDetector(params: {
       deltaSmooth.current[i] = 0;
       hold.current[i] = 0;
       refractory.current[i] = 0;
-      belowLow.current[i] = 1; // armed after calibration
+      belowLow.current[i] = 1; // armed post-calibration
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -177,6 +185,7 @@ export function useSequenceDetector(params: {
       activeIndex: s.steps.length
     }));
 
+    // FSM bookkeeping
     const now = ts;
     const last = lastEventMs.current;
     lastEventMs.current = now;
@@ -238,6 +247,7 @@ export function useSequenceDetector(params: {
       return { ...s, phase, revealLen, inputProgress, status, roundIndex };
     });
 
+    // When user completed N taps → clear (if configured) and re-arm
     if (state.phase === 'waiting-input') {
       const expected = revealIndices.current.length;
       const curr = inputCount.current;
@@ -263,7 +273,7 @@ export function useSequenceDetector(params: {
     }
   }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, config.clusterGapMs, state.phase, config.autoRoundDetect]);
 
-  // Input timeout → re-arm
+  // Input timeout → re-arm anyway
   useEffect(() => {
     if (state.phase !== 'waiting-input') return;
     const t = window.setTimeout(() => {
@@ -282,14 +292,16 @@ export function useSequenceDetector(params: {
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main sampling loop
+  // Main detection loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
       const dt = now - lastTick.current;
       lastTick.current = now;
       const instFps = dt > 0 ? 1000 / dt : 0;
-      fpsSmoothed.current = fpsSmoothed.current ? fpsSmoothed.current * 0.9 + instFps * 0.1 : instFps;
+      fpsSmoothed.current = fpsSmoothed.current
+        ? fpsSmoothed.current * 0.9 + instFps * 0.1
+        : instFps;
 
       const video = videoRef.current;
       if (!video || !state.running) {
@@ -298,8 +310,29 @@ export function useSequenceDetector(params: {
         return;
       }
 
+      // Base luminance sampling
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
+      // Optional color fractions for gating teal/green tiles
+      const color = config.colorGateEnabled
+        ? sampleGridColorFractions(
+            video,
+            roi,
+            rows,
+            cols,
+            config.paddingPct,
+            scratch,
+            {
+              revealRgb: hexToRgb(config.colorRevealHex),
+              inputRgb: hexToRgb(config.colorInputHex),
+              hueTolDeg: config.colorHueTol,
+              satMin: config.colorSatMin,
+              valMin: config.colorValMin
+            }
+          )
+        : { revealFrac: new Array(rows * cols).fill(0), inputFrac: new Array(rows * cols).fill(0) };
+
+      // Baseline EMA and per-cell deltas
       const count = rows * cols;
       const deltas = new Array<number>(count);
       const alpha = clamp(config.emaAlpha, 0.01, 0.99);
@@ -309,6 +342,7 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
+      // Remove global drift
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -317,31 +351,57 @@ export function useSequenceDetector(params: {
         const corrected = deltas[i] - med;
         deltaSmooth.current[i] = (1 - alpha) * deltaSmooth.current[i] + alpha * corrected;
         const v = deltaSmooth.current[i];
-        if (v > hotVal) { hotVal = v; hotIdx = i; }
+        if (v > hotVal) {
+          hotVal = v;
+          hotIdx = i;
+        }
       }
 
       const { thrHigh, thrLow, holdFrames, refractoryFrames } = config;
       const frameIndex = (state.frame || 0) + 1;
 
       for (let i = 0; i < count; i++) {
-        if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
+        if (refractory.current[i] > 0) {
+          refractory.current[i]--;
+          hold.current[i] = 0;
+          continue;
+        }
         const v = deltaSmooth.current[i];
 
-        if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
+        if (v < thrLow) {
+          belowLow.current[i] = 1;
+          hold.current[i] = 0;
+        }
 
-        // Use >= so borderline frames count; hold handles stability
-        if (belowLow.current[i] && v >= thrHigh) {
+        // Color gate: choose reveal vs input color depending on current phase
+        let gatePass = true;
+        if (config.colorGateEnabled) {
+          const isInputPhase = state.phase === 'waiting-input';
+          const frac = isInputPhase ? color.inputFrac[i] : color.revealFrac[i];
+          const minFrac = isInputPhase ? config.colorMinFracInput : config.colorMinFracReveal;
+          gatePass = frac >= minFrac;
+        }
+
+        // Hysteresis + hold + refractory, with color gate
+        if (gatePass && belowLow.current[i] && v >= thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
           if (hold.current[i] >= holdFrames) {
-            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1); // slightly favor confirmed hits
+            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1);
+
+            // Auto-arm on first flash if idle
             if (state.phase === 'idle' && config.autoRoundDetect) {
               setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
             }
+
+            // Confirmed detection
             pushStep(i, now, frameIndex, conf);
             refractory.current[i] = refractoryFrames;
-            belowLow.current[i] = 0; // require < thrLow to re-arm this cell
+            belowLow.current[i] = 0; // must drop below thrLow before re-arming this cell
             hold.current[i] = 0;
           }
+        } else {
+          // No color match or below threshold → do not accumulate hold
+          if (!gatePass) hold.current[i] = 0;
         }
       }
 
@@ -362,12 +422,32 @@ export function useSequenceDetector(params: {
       requestRef.current = null;
     };
   }, [
-    videoRef, roi, rows, cols, config.paddingPct, config.emaAlpha, config.thrHigh,
-    config.thrLow, config.holdFrames, config.refractoryFrames, config.autoRoundDetect,
-    state.running, state.frame, pushStep
+    videoRef,
+    roi,
+    rows,
+    cols,
+    config.paddingPct,
+    config.emaAlpha,
+    config.thrHigh,
+    config.thrLow,
+    config.holdFrames,
+    config.refractoryFrames,
+    config.autoRoundDetect,
+    config.colorGateEnabled,
+    config.colorRevealHex,
+    config.colorInputHex,
+    config.colorHueTol,
+    config.colorSatMin,
+    config.colorValMin,
+    config.colorMinFracReveal,
+    config.colorMinFracInput,
+    state.running,
+    state.frame,
+    state.phase,
+    pushStep
   ]);
 
-  // Auto-arm at start
+  // Auto-arm once when running starts
   useEffect(() => {
     if (state.running && config.autoRoundDetect && state.phase === 'idle') {
       arm();
@@ -376,7 +456,11 @@ export function useSequenceDetector(params: {
 
   return {
     state,
-    start, stop, reset, undo, calibrate,
+    start,
+    stop,
+    reset,
+    undo,
+    calibrate,
     setRunning: (v: boolean) => (v ? start() : stop()),
     arm
   };

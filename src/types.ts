@@ -29,6 +29,16 @@ export type DetectorConfig = {
   clusterGapMs: number;     // ms: gap that ends reveal and starts waiting for input
   inputTimeoutMs: number;   // ms: max time to wait for user to finish input
   rearmDelayMs: number;     // ms: small delay before arming next round
+
+  // Color gating
+  colorGateEnabled: boolean;
+  colorRevealHex: string; // '#1aa085'
+  colorInputHex: string;  // '#27ad61'
+  colorHueTol: number;    // degrees, e.g., 18
+  colorSatMin: number;    // 0..1, e.g., 0.35
+  colorValMin: number;    // 0..1, e.g., 0.35
+  colorMinFracReveal: number; // 0..1, e.g., 0.03
+  colorMinFracInput: number;  // 0..1, e.g., 0.03
 };
 
 // One confirmed flash/tap

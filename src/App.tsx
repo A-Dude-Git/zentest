@@ -28,7 +28,7 @@ export default function App() {
   // Start capture → auto-calibrate while idle → start detector (hands-free)
   const startCapture = async () => {
     const media = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
+      video: { cursor: 'never' },
       audio: false
     } as any);
 
