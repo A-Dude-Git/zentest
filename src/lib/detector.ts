@@ -1,4 +1,3 @@
-// src/lib/detector.ts
 import type { Rect } from '../types';
 
 export function luminance(r: number, g: number, b: number): number {
@@ -26,7 +25,7 @@ export function normToDisplayRect(roi: Rect, w: number, h: number) {
   return { x: roi.x * w, y: roi.y * h, width: roi.width * w, height: roi.height * h };
 }
 
-/** Per-cell average luminance inside ROI (with inner padding) */
+/* Per-cell average luminance inside ROI */
 export function sampleGridLuminance(
   video: HTMLVideoElement,
   roi: Rect,
@@ -115,7 +114,6 @@ export function hueDistDeg(a: number, b: number) {
   return d > 180 ? 360 - d : d;
 }
 
-/** Per-cell fraction of pixels close to teal (reveal) and green (input) */
 export function sampleGridColorFractions(
   video: HTMLVideoElement,
   roi: Rect,

@@ -1,4 +1,3 @@
-// src/components/CapturePanel.tsx
 import React, { useMemo, useState } from 'react';
 import type { DetectorConfig, Difficulty } from '../types';
 import { defaultConfigForDifficulty } from '../state/useSettings';

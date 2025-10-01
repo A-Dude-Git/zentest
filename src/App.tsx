@@ -1,4 +1,3 @@
-// src/App.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CapturePanel from './components/CapturePanel';
 import PatternPanel from './components/PatternPanel';
@@ -7,7 +6,7 @@ import GridOverlay from './components/GridOverlay';
 import { useSettings } from './state/useSettings';
 import { useSequenceDetector } from './hooks/useSequenceDetector';
 import type { Difficulty } from './types';
-import './styles.css'; // ← ensure this line exists
+import './styles.css';
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);

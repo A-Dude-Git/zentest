@@ -1,4 +1,3 @@
-// src/hooks/useSequenceDetector.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DetectorConfig, Step, Rect, Phase } from '../types';
 import { clamp, median, sampleGridLuminance, sampleGridColorFractions, hexToRgb } from '../lib/detector';
@@ -68,7 +67,6 @@ export function useSequenceDetector(params: {
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
 
-  // Canvas scratch
   const scratch = useMemo(() => { const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true })!; return { canvas, ctx }; }, []);
 
   // Reset on grid/energy window change
@@ -164,7 +162,6 @@ export function useSequenceDetector(params: {
       switch (phase) {
         case 'idle':
           if (config.autoRoundDetect) { phase = 'armed'; status = 'armed'; }
-        // fallthrough
         case 'armed': {
           phase = 'reveal';
           revealIndices.current = [cellIdx];
@@ -179,7 +176,6 @@ export function useSequenceDetector(params: {
           const expectMore = revealIndices.current.length < expectedLen;
 
           if (expectMore) {
-            // Treat anything as reveal until we reach the expected length (unless hard timeout)
             if (sinceLastReveal > config.revealHardTimeoutMs) {
               phase = 'waiting-input';
               inputCount.current = 1;
@@ -192,14 +188,12 @@ export function useSequenceDetector(params: {
               status = `reveal:${revealLen}`;
             }
           } else {
-            // We have enough reveal steps; now first input (or long gap) flips us
             if (isInputEvent || isi > Math.max(650, config.clusterGapMs)) {
               phase = 'waiting-input';
               inputCount.current = 1;
               inputProgress = 1;
               status = `input:1/${revealIndices.current.length}`;
             } else {
-              // still part of reveal (e.g., duplicate at the end)
               revealIndices.current.push(cellIdx);
               revealLen = revealIndices.current.length;
               lastRevealEventMs.current = now;

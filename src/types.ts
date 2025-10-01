@@ -1,4 +1,3 @@
-// src/types.ts
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 export type Phase = 'idle' | 'armed' | 'reveal' | 'waiting-input' | 'rearming';
@@ -24,10 +23,9 @@ export type DetectorConfig = {
   inputTimeoutMs: number;
   rearmDelayMs: number;
 
-  // New: expected reveal length logic
   useExpectedRevealLen: boolean;
-  initialRevealLen: number;     // Round 1 length (defaults to 3)
-  revealHardTimeoutMs: number;  // safety cutoff to end reveal
+  initialRevealLen: number;
+  revealHardTimeoutMs: number;
 
   colorGateEnabled: boolean;
   colorRevealHex: string;

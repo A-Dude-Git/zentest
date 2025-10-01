@@ -1,4 +1,3 @@
-// src/state/useSettings.ts
 import { useEffect, useMemo, useState } from 'react';
 import type { Difficulty, Rect, DetectorConfig } from '../types';
 

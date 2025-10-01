@@ -1,4 +1,3 @@
-// src/components/GridOverlay.tsx
 import React, { useEffect, useRef } from 'react';
 import type { Rect } from '../types';
 import { normToDisplayRect } from '../lib/detector';

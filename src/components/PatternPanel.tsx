@@ -1,4 +1,3 @@
-// src/components/PatternPanel.tsx
 import React, { useMemo } from 'react';
 import type { Step } from '../types';
 
@@ -6,7 +5,7 @@ type Props = {
   rows: number;
   cols: number;
   steps: Step[];
-  revealLen: number; // show only the reveal part of steps
+  revealLen: number; 
   onReset: () => void;
 };
 

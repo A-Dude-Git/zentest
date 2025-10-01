@@ -1,11 +1,10 @@
-// src/components/RectSelector.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Rect } from '../types';
 import { clamp } from '../lib/detector';
 
 type Props = {
   containerRef: React.RefObject<HTMLElement>;
-  roi: Rect; // normalized 0..1
+  roi: Rect; 
   onChange: (r: Rect) => void;
   enabled: boolean;
 };
