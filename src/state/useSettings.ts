@@ -15,6 +15,7 @@ function readJSON<T>(key: string, fallback: T): T {
   try { const v = localStorage.getItem(key); return v ? (JSON.parse(v) as T) : fallback; } catch { return fallback; }
 }
 function writeJSON(key: string, v: any) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+
 function sanitizeROI(r: Rect): Rect {
   const min = 0.05;
   let x = Math.min(Math.max(r.x, 0), 1);
@@ -28,18 +29,18 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
-    // Core detection (your working baseline)
+    // Your working baseline
     thrHigh: 10,
     thrLow: 6,
     holdFrames: 1,
-    refractoryFrames: 8,
+    refractoryFrames: 6,
     paddingPct: 16,
     emaAlpha: 0.20,
 
-    // Quick‑flash boost (ON: catches very short flashes)
+    // Quick‑flash (ON by default)
     quickFlashEnabled: true,
     energyWindow: 5,
-    energyScale: 2.5, // energyThr ≈ (thrHigh - thrLow) * energyScale
+    energyScale: 2.5,
 
     // Round behavior (always clear pattern on next round)
     appendAcrossRounds: false,
@@ -47,19 +48,19 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
 
     // Hands‑free FSM
     autoRoundDetect: true,
-    revealMaxISI: 900,   // don’t cut reveal short
+    revealMaxISI: 900,
     clusterGapMs: 900,
     inputTimeoutMs: 12000,
     rearmDelayMs: 120,
 
-    // Color gate (ON; permissive)
+    // Color gate ON (full controls in Advanced)
     colorGateEnabled: true,
     colorRevealHex: '#1aa085',
     colorInputHex:  '#27ad61',
     colorHueTol: 40,
     colorSatMin: 0.15,
     colorValMin: 0.15,
-    colorMinFracReveal: 0.002,
+    colorMinFracReveal: 0.002, // 0.2% of sampled pixels in the cell
     colorMinFracInput:  0.002
   };
 }
@@ -85,6 +86,7 @@ export function useSettings() {
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
 
+    // Ensure all fields exist (for upgrades)
     merged.quickFlashEnabled ??= def.quickFlashEnabled;
     merged.energyWindow ??= def.energyWindow;
     merged.energyScale ??= def.energyScale;
@@ -109,6 +111,7 @@ export function useSettings() {
     return merged;
   });
 
+  // Keep difficulty-linked defaults if not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
@@ -133,12 +136,17 @@ export function useSettings() {
   useEffect(() => writeJSON(diffKey, difficulty), [difficulty]);
   useEffect(() => writeJSON(cfgKey, config), [config]);
 
-  const { rows, cols } = useMemo(() => gridForDifficulty(difficulty), [difficulty]);
+  const { rows, cols } = useMemo(() => {
+    if (difficulty === 'easy') return { rows: 4, cols: 4 };
+    if (difficulty === 'medium') return { rows: 5, cols: 5 };
+    return { rows: 6, cols: 6 };
+  }, [difficulty]);
 
   const [editRoi, setEditRoi] = useState<boolean>(readJSON<boolean>(editKey, true));
   useEffect(() => writeJSON(editKey, editRoi), [editRoi]);
 
-  const [showAdvanced, setShowAdvanced] = useState<boolean>(readJSON<boolean>(advKey, false));
+  // Default Advanced to true so you can see color controls immediately
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(readJSON<boolean>(advKey, true));
   useEffect(() => writeJSON(advKey, showAdvanced), [showAdvanced]);
 
   const resetRoiToDefault = () => setRoi(DEFAULT_ROI);

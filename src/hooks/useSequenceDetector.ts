@@ -63,7 +63,7 @@ export function useSequenceDetector(params: {
   const refractory = useRef<Uint8Array>(new Uint8Array(N));
   const belowLow = useRef<Uint8Array>(new Uint8Array(N));
 
-  // Quick‑flash energy buffers
+  // Quick‑flash energy
   const energyBuf = useRef<Float32Array>(new Float32Array(1));
   const energySum = useRef<Float32Array>(new Float32Array(N));
   const energyIdx = useRef<number>(0);
@@ -226,7 +226,6 @@ export function useSequenceDetector(params: {
             inputProgress = 1;
             status = `input:1/${revealIndices.current.length}`;
           } else if (sinceLastReveal > Math.max(650, config.clusterGapMs)) {
-            // No recent reveal event → assume reveal ended
             phase = 'waiting-input';
             inputCount.current = 1;
             inputProgress = 1;
@@ -257,7 +256,7 @@ export function useSequenceDetector(params: {
     });
   }, [cols, config.autoRoundDetect, config.clusterGapMs]);
 
-  // Auto-advance: when we enter rearming, clear pattern and arm next round
+  // Auto-advance: on rearming, clear pattern and arm next round
   useEffect(() => {
     if (state.phase !== 'rearming') return;
     const t = window.setTimeout(() => {
@@ -317,7 +316,7 @@ export function useSequenceDetector(params: {
       // 1) Luminance
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
-      // 2) Color fractions (teal vs green)
+      // 2) Color fractions
       const color = sampleGridColorFractions(
         video, roi, rows, cols, config.paddingPct, scratch, {
           revealRgb: hexToRgb(config.colorRevealHex),
@@ -338,7 +337,7 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
-      // 4) Remove global drift
+      // 4) Global drift removal
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -351,11 +350,10 @@ export function useSequenceDetector(params: {
 
       const frameIndex = (state.frame || 0) + 1;
 
-      // 5) Energy ring update (quick‑flash)
+      // 5) Energy ring update
       const W = energyW.current;
-      const idx = energyIdx.current;
-      const base = idx * N;
-      const nextIdx = (idx + 1) % W;
+      const base = energyIdx.current * N;
+      const nextIdx = (energyIdx.current + 1) % W;
       for (let i = 0; i < count; i++) {
         const old = energyBuf.current[base + i];
         const pos = Math.max(0, deltaSmooth.current[i] - config.thrLow);
@@ -365,20 +363,30 @@ export function useSequenceDetector(params: {
       energyIdx.current = nextIdx;
       const energyThr = Math.max(1, (config.thrHigh - config.thrLow) * (config.energyScale || 2.5));
 
-      // 6) Trigger logic
+      // 6) Trigger logic (with refractory bypass for repeats)
       for (let i = 0; i < count; i++) {
-        if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
         const v = deltaSmooth.current[i];
 
+        // Update hysteresis arming
         if (v < config.thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
+        // If refractory > 0 but the cell is re-armed (belowLow==1), allow it to try again (repeat support)
+        if (refractory.current[i] > 0 && !belowLow.current[i]) {
+          refractory.current[i]--;
+          hold.current[i] = 0;
+          continue;
+        } else if (refractory.current[i] > 0 && belowLow.current[i]) {
+          // bypass: we won't early-continue; we let it retrigger if it truly flashed again
+        }
+
+        // Color gate
         const fracReveal = color.revealFrac[i];
         const fracInput  = color.inputFrac[i];
         const matchReveal = !config.colorGateEnabled || fracReveal >= config.colorMinFracReveal;
         const matchInput  = !config.colorGateEnabled || fracInput  >= config.colorMinFracInput;
         const passesColor = config.colorGateEnabled ? (matchReveal || matchInput) : true;
 
-        // Color‑aware local threshold (slightly lower when color is strong)
+        // Color‑aware local threshold
         let localThr = config.thrHigh;
         if (config.colorGateEnabled) {
           const strongReveal = fracReveal >= Math.max(config.colorMinFracReveal * 3, 0.004);
@@ -392,6 +400,7 @@ export function useSequenceDetector(params: {
         const byEnergy = config.quickFlashEnabled && belowLow.current[i] && energySum.current[i] >= energyThr;
 
         if (passesColor && (byHold || byEnergy)) {
+          // classify event
           let kind: EventKind;
           if (config.colorGateEnabled) {
             if (matchInput && !matchReveal) kind = 'input';
@@ -402,10 +411,12 @@ export function useSequenceDetector(params: {
           }
 
           const conf = clamp((v - localThr) / Math.max(1, localThr) + 1, 0, 1);
+
           if (state.phase === 'idle' && config.autoRoundDetect) {
             setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
           }
 
+          // confirm
           pushStep(i, performance.now(), frameIndex, conf, kind);
           refractory.current[i] = config.refractoryFrames;
           belowLow.current[i] = 0;

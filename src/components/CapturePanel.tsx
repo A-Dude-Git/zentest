@@ -50,7 +50,6 @@ export default function CapturePanel({
   showAdvanced, setShowAdvanced
 }: Props) {
   const [busy, setBusy] = useState(false);
-
   const onStartClick = async () => {
     setBusy(true);
     try { await onStartCapture(); } finally { setBusy(false); }
@@ -69,7 +68,6 @@ export default function CapturePanel({
   const restoreDefaults = () => {
     const def = defaultConfigForDifficulty(difficulty);
     setConfig(def);
-    // optional: clear persisted to ensure clean slate next reload
     try { localStorage.removeItem('zen-solver.config'); } catch {}
   };
 
@@ -171,19 +169,21 @@ export default function CapturePanel({
             <input type="range" min={5} max={80} step={1} value={config.thrHigh} onChange={(e) => set({ thrHigh: Number(e.target.value) })} />
             <label className="grow">Low Threshold: {config.thrLow.toFixed(0)}</label>
             <input type="range" min={2} max={60} step={1} value={config.thrLow} onChange={(e) => set({ thrLow: Number(e.target.value) })} />
+            <label className="grow">Hold Frames: {config.holdFrames}</label>
+            <input type="range" min={1} max={8} step={1} value={config.holdFrames} onChange={(e) => set({ holdFrames: Number(e.target.value) })} />
+            <label className="grow">Refractory Frames: {config.refractoryFrames}</label>
+            <input type="range" min={0} max={20} step={1} value={config.refractoryFrames} onChange={(e) => set({ refractoryFrames: Number(e.target.value) })} />
             <label className="grow">EMA α: {config.emaAlpha.toFixed(2)}</label>
             <input type="range" min={0.05} max={0.5} step={0.01} value={config.emaAlpha} onChange={(e) => set({ emaAlpha: Number(e.target.value) })} />
             <label className="grow">Padding %: {config.paddingPct.toFixed(0)}%</label>
             <input type="range" min={0} max={30} step={1} value={config.paddingPct} onChange={(e) => set({ paddingPct: Number(e.target.value) })} />
-            <label className="grow">Hold Frames: {config.holdFrames}</label>
-            <input type="range" min={1} max={8} step={1} value={config.holdFrames} onChange={(e) => set({ holdFrames: Number(e.target.value) })} />
-            <label className="grow">Refractory Frames: {config.refractoryFrames}</label>
-            <input type="range" min={2} max={20} step={1} value={config.refractoryFrames} onChange={(e) => set({ refractoryFrames: Number(e.target.value) })} />
           </div>
 
           <div className="row wrap" style={{ marginTop: 6 }}>
             <label className="grow">Reveal Max ISI (ms): {config.revealMaxISI}</label>
-            <input type="range" min={300} max={900} step={10} value={config.revealMaxISI} onChange={(e) => set({ revealMaxISI: Number(e.target.value) })} />
+            <input type="range" min={300} max={1200} step={10} value={config.revealMaxISI} onChange={(e) => set({ revealMaxISI: Number(e.target.value) })} />
+            <label className="grow">Reveal→Input Gap (ms): {config.clusterGapMs}</label>
+            <input type="range" min={450} max={1500} step={10} value={config.clusterGapMs} onChange={(e) => set({ clusterGapMs: Number(e.target.value) })} />
             <label className="grow">Input Timeout (ms): {config.inputTimeoutMs}</label>
             <input type="range" min={4000} max={20000} step={500} value={config.inputTimeoutMs} onChange={(e) => set({ inputTimeoutMs: Number(e.target.value) })} />
             <label className="grow">Re-arm Delay (ms): {config.rearmDelayMs}</label>
@@ -199,7 +199,7 @@ export default function CapturePanel({
               checked={config.quickFlashEnabled}
               onChange={(e) => set({ quickFlashEnabled: e.target.checked })}
             />
-            <div className="small">Catches very short flashes by summing signal over ~{config.energyWindow} frames.</div>
+            <div className="small">Catches ultra‑short flashes by summing signal over ~{config.energyWindow} frames.</div>
           </div>
 
           <hr className="sep" />
@@ -211,7 +211,27 @@ export default function CapturePanel({
               checked={config.colorGateEnabled}
               onChange={(e) => set({ colorGateEnabled: e.target.checked })}
             />
-            <div className="small">Match tiles near #1aa085 and #27ad61 (optional).</div>
+          </div>
+          {config.colorGateEnabled && (
+            <div className="row wrap" style={{ marginTop: 6 }}>
+              <label className="grow">Hue tolerance (°): {config.colorHueTol}</label>
+              <input type="range" min={8} max={60} step={1} value={config.colorHueTol} onChange={(e) => set({ colorHueTol: Number(e.target.value) })} />
+              <label className="grow">Saturation min: {config.colorSatMin.toFixed(2)}</label>
+              <input type="range" min={0} max={1} step={0.01} value={config.colorSatMin} onChange={(e) => set({ colorSatMin: Number(e.target.value) })} />
+              <label className="grow">Value min: {config.colorValMin.toFixed(2)}</label>
+              <input type="range" min={0} max={1} step={0.01} value={config.colorValMin} onChange={(e) => set({ colorValMin: Number(e.target.value) })} />
+              <label className="grow">Min tile area (reveal): {(config.colorMinFracReveal * 100).toFixed(2)}%</label>
+              <input type="range" min={0} max={0.05} step={0.001} value={config.colorMinFracReveal} onChange={(e) => set({ colorMinFracReveal: Number(e.target.value) })} />
+              <label className="grow">Min tile area (input): {(config.colorMinFracInput * 100).toFixed(2)}%</label>
+              <input type="range" min={0} max={0.05} step={0.001} value={config.colorMinFracInput} onChange={(e) => set({ colorMinFracInput: Number(e.target.value) })} />
+            </div>
+          )}
+
+          <hr className="sep" />
+          <div className="section-title">Sequence Control</div>
+          <div className="row">
+            <button className="warn" onClick={onUndo}>Undo last</button>
+            <button className="danger" onClick={onReset}>Reset</button>
           </div>
         </>
       )}
