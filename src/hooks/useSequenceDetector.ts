@@ -176,12 +176,7 @@ export function useSequenceDetector(params: {
       activeIndex: s.steps.length
     }));
 
-    // Phase transitions decided inside updater
-    const now = ts;
-    const last = lastEventMs.current;
-    lastEventMs.current = now;
-    const isi = last ? now - last : Infinity;
-
+    // Phase transitions decided inside updater (no stale reads)
     setState(prev => {
       let phase: Phase = prev.phase;
       let revealLen = prev.revealLen;
@@ -203,14 +198,14 @@ export function useSequenceDetector(params: {
           break;
         }
         case 'reveal': {
-          const isInputEvent = kind === 'input';
-          // Prefer color: first green flips immediately; otherwise only flip on a clear gap
-          if (isInputEvent || isi > Math.max(600, config.clusterGapMs)) {
+          // Prefer color to flip: only flip when the first green (input) event arrives
+          if (kind === 'input') {
             phase = 'waiting-input';
             inputCount.current = 1;
             inputProgress = 1;
             status = `input:1/${revealIndices.current.length}`;
           } else {
+            // Stay in reveal and grow the sequence
             revealIndices.current.push(cellIdx);
             revealLen = revealIndices.current.length;
             status = `reveal:${revealLen}`;
@@ -228,21 +223,20 @@ export function useSequenceDetector(params: {
           break;
         }
         case 'rearming':
-          // ignore further inputs until re-armed
           break;
       }
 
       return { ...prev, phase, revealLen, inputProgress, status, roundIndex };
     });
-  }, [cols, config.autoRoundDetect, config.clusterGapMs]);
+  }, [cols, config.autoRoundDetect]);
 
-  // When we enter "rearming", schedule clear + next round (always clears the Pattern)
+  // When we enter "rearming", schedule clear + next round (always clear Pattern)
   useEffect(() => {
     if (state.phase !== 'rearming') return;
     const t = window.setTimeout(() => {
       setState(s => ({
         ...s,
-        steps: [],          // always clear the pattern block between rounds
+        steps: [],          // clear Pattern block
         activeIndex: null,
         roundIndex: s.roundIndex + 1,
         revealLen: 0,
@@ -275,7 +269,7 @@ export function useSequenceDetector(params: {
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main sampling loop
+  // Main sampling loop (stable, simple, color-gated)
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
@@ -327,36 +321,27 @@ export function useSequenceDetector(params: {
       }
 
       const frameIndex = (state.frame || 0) + 1;
+      const { thrHigh, thrLow, holdFrames, refractoryFrames } = config;
 
-      // 5) Per-cell trigger with color‑aware local threshold
+      // 5) Per-cell trigger
       for (let i = 0; i < count; i++) {
         if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
         const v = deltaSmooth.current[i];
 
         // Hysteresis arming
-        if (v < config.thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
+        if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
-        // Color gate
+        // Color gate (reveal teal OR input green)
         const fracReveal = color.revealFrac[i];
         const fracInput  = color.inputFrac[i];
         const matchReveal = !config.colorGateEnabled || fracReveal >= config.colorMinFracReveal;
         const matchInput  = !config.colorGateEnabled || fracInput  >= config.colorMinFracInput;
         const passesColor = config.colorGateEnabled ? (matchReveal || matchInput) : true;
 
-        // Slightly lower local threshold if we strongly match the expected color
-        let localThr = config.thrHigh;
-        if (config.colorGateEnabled) {
-          const strongReveal = fracReveal >= Math.max(config.colorMinFracReveal * 3, 0.004);
-          const strongInput  = fracInput  >= Math.max(config.colorMinFracInput  * 3, 0.004);
-          if (strongReveal || strongInput) {
-            localThr = Math.max(config.thrLow + 1, Math.round(config.thrHigh * 0.75));
-          }
-        }
-
-        if (passesColor && belowLow.current[i] && v >= localThr) {
+        if (passesColor && belowLow.current[i] && v >= thrHigh) {
           hold.current[i] = Math.min(255, hold.current[i] + 1);
-          if (hold.current[i] >= config.holdFrames) {
-            // Determine event kind by color; if ambiguous, use phase
+          if (hold.current[i] >= holdFrames) {
+            // Determine event kind by color; if ambiguous, prefer phase
             let kind: EventKind;
             if (config.colorGateEnabled) {
               if (matchInput && !matchReveal) kind = 'input';
@@ -366,28 +351,28 @@ export function useSequenceDetector(params: {
               kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
             }
 
-            const conf = clamp((v - localThr) / Math.max(1, localThr) + 1, 0, 1);
+            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1);
 
             if (state.phase === 'idle' && config.autoRoundDetect) {
               setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
             }
 
             // Confirmed detection
-            pushStep(i, performance.now(), frameIndex, conf, kind);
-            refractory.current[i] = config.refractoryFrames;
+            pushStep(i, now, frameIndex, conf, kind);
+            refractory.current[i] = refractoryFrames;
             belowLow.current[i] = 0;
             hold.current[i] = 0;
           }
         } else {
           if (!passesColor) hold.current[i] = 0;
-          else if (v >= localThr) hold.current[i] = Math.min(255, hold.current[i] + 1);
+          else if (v >= thrHigh) hold.current[i] = Math.min(255, hold.current[i] + 1);
         }
       }
 
       setState(s => ({
         ...s,
         hotIndex: hotIdx,
-        confidence: hotVal > 0 ? clamp(hotVal / Math.max(config.thrHigh, 1), 0, 1) : 0,
+        confidence: hotVal > 0 ? clamp(hotVal / Math.max(thrHigh, 1), 0, 1) : 0,
         fps: Math.round(fpsSmoothed.current * 10) / 10,
         frame: frameIndex
       }));
