@@ -12,8 +12,12 @@ const advKey = `${LS_PREFIX}.showAdvanced`;
 const DEFAULT_ROI: Rect = { x: 0.2, y: 0.2, width: 0.6, height: 0.6 };
 
 function readJSON<T>(key: string, fallback: T): T {
-  try { const v = localStorage.getItem(key); return v ? (JSON.parse(v) as T) : fallback; }
-  catch { return fallback; }
+  try {
+    const v = localStorage.getItem(key);
+    return v ? (JSON.parse(v) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 function writeJSON(key: string, v: any) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
@@ -31,7 +35,7 @@ function sanitizeROI(r: Rect): Rect {
 
 export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
   return {
-    // Detection core (your working values)
+    // Detection core (what worked for you)
     thrHigh: 10,
     thrLow: 6,
     holdFrames: 1,
@@ -39,31 +43,30 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
     paddingPct: 16,
     emaAlpha: 0.20,
 
-    // Quick-flash fields kept for compatibility (not used)
+    // Quick‑flash boost (kept simple off by default now)
     quickFlashEnabled: false,
     energyWindow: 5,
     energyScale: 3.0,
 
-    // Per-round
-    appendAcrossRounds: false, // always clear between rounds
+    // Per‑round behavior
+    appendAcrossRounds: false,  // always clear pattern when next round starts
     idleGapMs: 2000,
 
-    // Hands-free FSM
+    // Hands‑free FSM
     autoRoundDetect: true,
-    // We’ll rely on color to flip to input; keep these permissive
-    revealMaxISI: 900,
-    clusterGapMs: 900,
+    revealMaxISI: 900,    // allow fast but also slightly spaced reveals
+    clusterGapMs: 900,    // gap that signals reveal ended if no input color seen
     inputTimeoutMs: 12000,
     rearmDelayMs: 120,
 
-    // Color gate (ON per your best results)
+    // Color gate (ON by default per your best results)
     colorGateEnabled: true,
-    colorRevealHex: '#1aa085',
-    colorInputHex:  '#27ad61',
+    colorRevealHex: '#1aa085', // teal (reveal)
+    colorInputHex:  '#27ad61', // green (player input)
     colorHueTol: 40,
     colorSatMin: 0.15,
     colorValMin: 0.15,
-    colorMinFracReveal: 0.002, // 0.2%
+    colorMinFracReveal: 0.002, // 0.2% area
     colorMinFracInput:  0.002
   };
 }
@@ -75,7 +78,9 @@ export function gridForDifficulty(d: Difficulty): { rows: number; cols: number }
 }
 
 export function useSettings() {
-  const [difficulty, setDifficulty] = useState<Difficulty>(readJSON<Difficulty>(diffKey, 'expert'));
+  const [difficulty, setDifficulty] = useState<Difficulty>(
+    readJSON<Difficulty>(diffKey, 'expert')
+  );
 
   const [roiByDiff, setRoiByDiff] = useState<Record<Difficulty, Rect>>(() => ({
     easy: sanitizeROI(readJSON<Rect>(roiKey('easy'), DEFAULT_ROI)),
@@ -89,7 +94,7 @@ export function useSettings() {
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
 
-    // Ensure all fields exist for upgraded users
+    // Make sure all fields exist (for users upgrading)
     merged.quickFlashEnabled ??= def.quickFlashEnabled;
     merged.energyWindow ??= def.energyWindow;
     merged.energyScale ??= def.energyScale;
@@ -114,6 +119,7 @@ export function useSettings() {
     return merged;
   });
 
+  // Keep difficulty-linked defaults if not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
