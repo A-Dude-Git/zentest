@@ -20,7 +20,7 @@ type DetectorState = {
   frame: number;
   phase: Phase;
   roundIndex: number;
-  revealLen: number;     // prefix length of steps[] belonging to reveal
+  revealLen: number;     // prefix of steps[] that belongs to the reveal
   inputProgress: number; // 0..N while waiting-input
   status: string;
 };
@@ -63,13 +63,7 @@ export function useSequenceDetector(params: {
   const refractory = useRef<Uint8Array>(new Uint8Array(N));
   const belowLow = useRef<Uint8Array>(new Uint8Array(N));
 
-  // Quick‑flash energy buffers
-  const energyBuf = useRef<Float32Array>(new Float32Array(1)); // resized later to N*W
-  const energySum = useRef<Float32Array>(new Float32Array(N));
-  const energyIdx = useRef<number>(0);
-  const energyW = useRef<number>(5);
-
-  // FSM trackers
+  // Reveal/input tracking
   const lastEventMs = useRef<number | null>(null);
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
@@ -81,7 +75,7 @@ export function useSequenceDetector(params: {
     return { canvas, ctx };
   }, []);
 
-  // Reset when grid changes
+  // Reset arrays when grid changes
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -89,13 +83,7 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1); // allow first trigger without prior low
-
-    // Energy buffers
-    energyW.current = Math.max(2, Math.floor(config.energyWindow || 5));
-    energyBuf.current = new Float32Array(n * energyW.current);
-    energySum.current = new Float32Array(n);
-    energyIdx.current = 0;
+    belowLow.current.fill(1); // allow the first trigger without prior low
 
     revealIndices.current = [];
     inputCount.current = 0;
@@ -113,7 +101,7 @@ export function useSequenceDetector(params: {
       inputProgress: 0,
       status: 'idle'
     }));
-  }, [rows, cols, config.energyWindow]);
+  }, [rows, cols]);
 
   const reset = useCallback(() => {
     revealIndices.current = [];
@@ -161,9 +149,6 @@ export function useSequenceDetector(params: {
       hold.current[i] = 0;
       refractory.current[i] = 0;
       belowLow.current[i] = 1; // armed after calibration
-      energySum.current[i] = 0;
-      // zero energy ring for safety
-      for (let k = 0; k < energyW.current; k++) energyBuf.current[k * N + i] = 0;
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -184,38 +169,46 @@ export function useSequenceDetector(params: {
     const r = Math.floor(cellIdx / cols);
     const c = cellIdx % cols;
 
+    // 1) Append step
     setState(s => ({
       ...s,
       steps: [...s.steps, { row: r, col: c, t: ts, frame, confidence: conf }],
       activeIndex: s.steps.length
     }));
 
+    // 2) Phase machine with completion decided INSIDE updater (no stale reads)
+    const expectedLenRef = revealIndices.current.length;
+    let scheduleRearm = false;
+
     const now = ts;
     const last = lastEventMs.current;
     lastEventMs.current = now;
     const isi = last ? now - last : Infinity;
 
-    setState(s => {
-      let phase: Phase = s.phase;
-      let revealLen = s.revealLen;
-      let inputProgress = s.inputProgress;
-      let status = s.status;
-      let roundIndex = s.roundIndex;
+    setState(prev => {
+      let phase: Phase = prev.phase;
+      let revealLen = prev.revealLen;
+      let inputProgress = prev.inputProgress;
+      let status = prev.status;
+      let roundIndex = prev.roundIndex;
 
       switch (phase) {
         case 'idle':
           if (config.autoRoundDetect) { phase = 'armed'; status = 'armed'; }
         // fallthrough
         case 'armed': {
+          // First event starts the reveal
           phase = 'reveal';
           revealIndices.current = [cellIdx];
           revealLen = 1;
+          inputCount.current = 0;
           status = 'reveal:1';
           break;
         }
         case 'reveal': {
           const isInputEvent = kind === 'input';
           if (isInputEvent || isi > config.revealMaxISI) {
+            // Flip to waiting-input and count this as first input
             phase = 'waiting-input';
             inputCount.current = 1;
             inputProgress = 1;
@@ -231,42 +224,42 @@ export function useSequenceDetector(params: {
           inputCount.current += 1;
           inputProgress = inputCount.current;
           status = `input:${inputProgress}/${revealIndices.current.length}`;
-          if (inputProgress >= revealIndices.current.length) {
-            phase = 'rearming';
-            status = 'rearming';
-          }
           break;
         }
         case 'rearming':
+          // ignore
           break;
       }
 
-      return { ...s, phase, revealLen, inputProgress, status, roundIndex };
+      // Decide completion now (covers both the first input case and later inputs)
+      if (phase === 'waiting-input' && inputProgress >= revealIndices.current.length) {
+        phase = 'rearming';
+        status = 'rearming';
+        scheduleRearm = true;
+      }
+
+      return { ...prev, phase, revealLen, inputProgress, status, roundIndex };
     });
 
-    // If user completed N inputs → (optionally) clear and re‑arm
-    if (state.phase === 'waiting-input') {
-      const expected = revealIndices.current.length;
-      const curr = inputCount.current;
-      if (curr >= expected) {
-        window.setTimeout(() => {
-          if (!config.appendAcrossRounds) {
-            setState(s => ({ ...s, steps: [], activeIndex: null }));
-          }
-          setState(s => ({
-            ...s,
-            roundIndex: s.roundIndex + 1,
-            revealLen: 0,
-            inputProgress: 0,
-            phase: 'armed',
-            status: 'armed'
-          }));
-          revealIndices.current = [];
-          inputCount.current = 0;
-        }, Math.max(0, config.rearmDelayMs));
-      }
+    // 3) If completed, schedule re-arm after configured delay
+    if (scheduleRearm) {
+      window.setTimeout(() => {
+        if (!config.appendAcrossRounds) {
+          setState(s => ({ ...s, steps: [], activeIndex: null }));
+        }
+        setState(s => ({
+          ...s,
+          roundIndex: s.roundIndex + 1,
+          revealLen: 0,
+          inputProgress: 0,
+          phase: 'armed',
+          status: 'armed'
+        }));
+        revealIndices.current = [];
+        inputCount.current = 0;
+      }, Math.max(0, config.rearmDelayMs));
     }
-  }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, state.phase, config.autoRoundDetect]);
+  }, [cols, config.appendAcrossRounds, config.rearmDelayMs, config.revealMaxISI, config.autoRoundDetect]);
 
   // Fail-safe timeout while waiting for input
   useEffect(() => {
@@ -285,7 +278,7 @@ export function useSequenceDetector(params: {
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main loop
+  // Main sampling loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
@@ -301,10 +294,10 @@ export function useSequenceDetector(params: {
         return;
       }
 
-      // 1) Luminance
+      // 1) Luminance grid
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
-      // 2) Optional color fractions
+      // 2) Optional color fractions (teal reveal, green input)
       const color = sampleGridColorFractions(
         video, roi, rows, cols, config.paddingPct, scratch, {
           revealRgb: hexToRgb(config.colorRevealHex),
@@ -325,7 +318,7 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
-      // 4) Global drift removal and hot cell
+      // 4) Remove global drift (median)
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -339,68 +332,51 @@ export function useSequenceDetector(params: {
       const { thrHigh, thrLow, holdFrames, refractoryFrames } = config;
       const frameIndex = (state.frame || 0) + 1;
 
-      // 5) Quick‑flash energy update (ring buffer)
-      const W = energyW.current;
-      const idx = energyIdx.current;
-      const base = idx * N;
-      const nextIdx = (idx + 1) % W;
-
-      for (let i = 0; i < count; i++) {
-        const old = energyBuf.current[base + i];
-        const pos = Math.max(0, deltaSmooth.current[i] - thrLow);
-        energyBuf.current[base + i] = pos;
-        energySum.current[i] += pos - old;
-      }
-      energyIdx.current = nextIdx;
-
-      // 6) Trigger logic
-      const energyThr = Math.max(1, (thrHigh - thrLow) * (config.energyScale || 3.0));
+      // 5) Per-cell trigger
       for (let i = 0; i < count; i++) {
         if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
         const v = deltaSmooth.current[i];
 
         if (v < thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
-        // Color gating (optional)
+        // Color gate by phase (optional; when disabled, both pass)
         const fracReveal = color.revealFrac[i];
         const fracInput  = color.inputFrac[i];
         const matchReveal = !config.colorGateEnabled || fracReveal >= config.colorMinFracReveal;
         const matchInput  = !config.colorGateEnabled || fracInput  >= config.colorMinFracInput;
         const passesColor = config.colorGateEnabled ? (matchReveal || matchInput) : true;
 
-        const triggerByHold = belowLow.current[i] && v >= thrHigh && (hold.current[i] + 1) >= holdFrames;
-        const triggerByEnergy = config.quickFlashEnabled && belowLow.current[i] && energySum.current[i] >= energyThr;
+        if (passesColor && belowLow.current[i] && v >= thrHigh) {
+          hold.current[i] = Math.min(255, hold.current[i] + 1);
+          if (hold.current[i] >= holdFrames) {
+            // Determine the event kind
+            let kind: EventKind;
+            if (config.colorGateEnabled) {
+              if (matchInput && !matchReveal) kind = 'input';
+              else if (matchReveal && !matchInput) kind = 'reveal';
+              else kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+            } else {
+              kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+            }
 
-        if (passesColor && (triggerByHold || triggerByEnergy)) {
-          // Determine event kind
-          let kind: EventKind;
-          if (config.colorGateEnabled) {
-            if (matchInput && !matchReveal) kind = 'input';
-            else if (matchReveal && !matchInput) kind = 'reveal';
-            else kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
-          } else {
-            kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+            const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1);
+
+            if (state.phase === 'idle' && config.autoRoundDetect) {
+              setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
+            }
+
+            // Confirmed detection
+            pushStep(i, now, frameIndex, conf, kind);
+            refractory.current[i] = refractoryFrames;
+            belowLow.current[i] = 0;
+            hold.current[i] = 0;
           }
-
-          const conf = clamp((v - thrHigh) / Math.max(1, thrHigh) + 1, 0, 1);
-
-          if (state.phase === 'idle' && config.autoRoundDetect) {
-            setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
-          }
-
-          // Confirm detection
-          pushStep(i, now, frameIndex, conf, kind);
-          refractory.current[i] = refractoryFrames;
-          belowLow.current[i] = 0;
-          hold.current[i] = 0;
-
-          // Damp energy a bit so it doesn't immediately retrigger
-          energySum.current[i] = 0;
-          for (let k = 0; k < W; k++) energyBuf.current[k * N + i] = 0;
         } else {
-          // accumulate hold only when over thrHigh
-          if (v >= thrHigh) hold.current[i] = Math.min(255, hold.current[i] + 1);
-          else if (!passesColor) hold.current[i] = 0;
+          if (v >= thrHigh) {
+            hold.current[i] = Math.min(255, hold.current[i] + 1);
+          } else if (!passesColor) {
+            hold.current[i] = 0;
+          }
         }
       }
 
@@ -427,7 +403,6 @@ export function useSequenceDetector(params: {
     config.colorGateEnabled, config.colorRevealHex, config.colorInputHex,
     config.colorHueTol, config.colorSatMin, config.colorValMin,
     config.colorMinFracReveal, config.colorMinFracInput,
-    config.quickFlashEnabled, config.energyScale, // energyWindow handled in grid effect
     state.running, state.frame, state.phase, pushStep
   ]);
 
