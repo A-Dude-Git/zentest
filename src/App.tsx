@@ -7,6 +7,7 @@ import GridOverlay from './components/GridOverlay';
 import { useSettings } from './state/useSettings';
 import { useSequenceDetector } from './hooks/useSequenceDetector';
 import type { Difficulty } from './types';
+import './styles.css'; // ← ensure this line exists
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -40,12 +41,11 @@ export default function App() {
     if (videoRef.current) {
       videoRef.current.srcObject = media;
       await videoRef.current.play().catch(() => {});
-      // warm up a couple of frames
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
     }
     detector.setRunning(false);
-    await detector.calibrate(); // press Train only after this
+    await detector.calibrate();
     detector.setRunning(true);
   };
 
@@ -60,7 +60,6 @@ export default function App() {
       if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); detector.setRunning(!detector.state.running); }
       else if (e.key.toLowerCase() === 'c') { e.preventDefault(); detector.calibrate(); }
       else if (e.key.toLowerCase() === 'r') { e.preventDefault(); detector.reset(); }
-      else if (e.key === 'Backspace') { e.preventDefault(); /* undo hidden in simple mode */ }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -156,9 +155,9 @@ export default function App() {
         <div>
           <div className="section-title">Tips</div>
           <ul className="small" style={{ marginTop: 0 }}>
-            <li>Start Capture, align ROI, Calibrate while the board is idle, then click Train in-game.</li>
+            <li>Start Capture, align ROI, Calibrate while the board is idle, then click Train.</li>
             <li>The pattern updates during reveal; repeat it. Next round arms automatically.</li>
-            <li>High-sensitivity is enabled by default to catch fast flashes.</li>
+            <li>Use Advanced to tweak Color Gate if needed; defaults work for most screens.</li>
           </ul>
         </div>
       </div>
