@@ -40,29 +40,34 @@ export function defaultConfigForDifficulty(d: Difficulty): DetectorConfig {
     thrHigh: 12,
     thrLow: 6,
     holdFrames: 2,
-    refractoryFrames: 6,
+    refractoryFrames: 8,
     paddingPct: 14,
-    emaAlpha: 0.2,
+    emaAlpha: 0.20,
+
+    // Quick‑flash boost
+    quickFlashEnabled: true,
+    energyWindow: 5,
+    energyScale: 3.0, // energyThr ≈ (thrHigh - thrLow) * energyScale
 
     // Round behavior
     appendAcrossRounds: d === 'expert' ? false : true,
     idleGapMs: 2000,
 
-    // Hands-free FSM
+    // Hands‑free FSM
     autoRoundDetect: true,
-    revealMaxISI: 520,   // used only as a soft guard; color decides first
-    clusterGapMs: 700,   // retained for compatibility (not relied on)
+    revealMaxISI: 600,
+    clusterGapMs: 800,
     inputTimeoutMs: 12000,
-    rearmDelayMs: 100,
+    rearmDelayMs: 120,
 
-    // Color gate ON by default (permissive + robust)
-    colorGateEnabled: true,
-    colorRevealHex: '#1aa085', // teal reveal
-    colorInputHex:  '#27ad61', // green input
-    colorHueTol: 40,           // wide tolerance to handle tone-mapping
+    // Color gate OFF by default (turn on later if needed)
+    colorGateEnabled: false,
+    colorRevealHex: '#1aa085',
+    colorInputHex:  '#27ad61',
+    colorHueTol: 40,
     colorSatMin: 0.15,
     colorValMin: 0.15,
-    colorMinFracReveal: 0.002, // 0.2% of sampled pixels is enough
+    colorMinFracReveal: 0.002, // 0.2%
     colorMinFracInput:  0.002
   };
 }
@@ -90,9 +95,18 @@ export function useSettings() {
     const def = defaultConfigForDifficulty(difficulty);
     const merged: DetectorConfig = { ...def, ...persisted };
 
-    // Ensure required fields (esp. color)
+    // Ensure newly added fields exist
+    merged.quickFlashEnabled ??= def.quickFlashEnabled;
+    merged.energyWindow ??= def.energyWindow;
+    merged.energyScale ??= def.energyScale;
+
     merged.appendAcrossRounds ??= def.appendAcrossRounds;
     merged.autoRoundDetect ??= def.autoRoundDetect;
+
+    merged.revealMaxISI ??= def.revealMaxISI;
+    merged.clusterGapMs ??= def.clusterGapMs;
+    merged.inputTimeoutMs ??= def.inputTimeoutMs;
+    merged.rearmDelayMs ??= def.rearmDelayMs;
 
     merged.colorGateEnabled ??= def.colorGateEnabled;
     merged.colorRevealHex ??= def.colorRevealHex;
@@ -103,15 +117,10 @@ export function useSettings() {
     merged.colorMinFracReveal ??= def.colorMinFracReveal;
     merged.colorMinFracInput ??= def.colorMinFracInput;
 
-    merged.revealMaxISI ??= def.revealMaxISI;
-    merged.clusterGapMs ??= def.clusterGapMs;
-    merged.inputTimeoutMs ??= def.inputTimeoutMs;
-    merged.rearmDelayMs ??= def.rearmDelayMs;
-
     return merged;
   });
 
-  // Align difficulty-dependent defaults when not overridden
+  // Align difficulty-dependent defaults if not overridden
   useEffect(() => {
     setConfig(prev => {
       const stored = readJSON<Partial<DetectorConfig>>(cfgKey, {});
@@ -141,7 +150,6 @@ export function useSettings() {
   const [editRoi, setEditRoi] = useState<boolean>(readJSON<boolean>(editKey, true));
   useEffect(() => writeJSON(editKey, editRoi), [editRoi]);
 
-  // Simple vs Advanced toggle (persisted)
   const [showAdvanced, setShowAdvanced] = useState<boolean>(readJSON<boolean>(advKey, false));
   useEffect(() => writeJSON(advKey, showAdvanced), [showAdvanced]);
 

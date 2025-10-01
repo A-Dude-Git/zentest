@@ -7,7 +7,7 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 export type Phase = 'idle' | 'armed' | 'reveal' | 'waiting-input' | 'rearming';
 
 export type DetectorConfig = {
-  // Detection
+  // Detection core
   thrHigh: number;
   thrLow: number;
   holdFrames: number;
@@ -15,16 +15,21 @@ export type DetectorConfig = {
   paddingPct: number;  // inner padding % per cell
   emaAlpha: number;    // 0..1
 
-  // Per-round behavior
+  // Quick‑flash boost (temporal energy)
+  quickFlashEnabled: boolean;
+  energyWindow: number;  // frames, e.g., 5
+  energyScale: number;   // multiplier for (thrHigh - thrLow), e.g., 3.0
+
+  // Per‑round behavior
   appendAcrossRounds: boolean; // if false, clear steps each new round
   idleGapMs: number;
 
-  // Hands-free FSM
+  // Hands‑free FSM
   autoRoundDetect: boolean;
-  revealMaxISI: number;     // ms: max gap inside reveal
-  clusterGapMs: number;     // ms: gap that ends reveal and starts input
-  inputTimeoutMs: number;   // ms: fail-safe while waiting input
-  rearmDelayMs: number;     // ms: small delay before next arm
+  revealMaxISI: number;     // ms: max gap inside reveal (soft guard)
+  clusterGapMs: number;     // ms: legacy; kept for compatibility
+  inputTimeoutMs: number;   // ms
+  rearmDelayMs: number;     // ms
 
   // Color gate (optional)
   colorGateEnabled: boolean;
