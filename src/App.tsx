@@ -28,20 +28,25 @@ export default function App() {
 
   const startCapture = async () => {
     const media = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'never' }, // hide cursor to avoid false positives
+      video: {
+        cursor: 'never',
+        frameRate: { ideal: 60, max: 60 },
+        width: { max: 1920 },
+        height: { max: 1080 }
+      },
       audio: false
     } as any);
     setStream(media);
     if (videoRef.current) {
       videoRef.current.srcObject = media;
       await videoRef.current.play().catch(() => {});
-      // Give it a couple frames before calibrating
+      // warm up a couple of frames
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
     }
     detector.setRunning(false);
-    await detector.calibrate(); // board idle here (before Train)
-    detector.setRunning(true);  // hands-free from now on
+    await detector.calibrate(); // press Train only after this
+    detector.setRunning(true);
   };
 
   const stopCapture = () => {
@@ -50,7 +55,6 @@ export default function App() {
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  // Optional hotkeys (not required during play)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); detector.setRunning(!detector.state.running); }
@@ -112,7 +116,6 @@ export default function App() {
         <div className="section-title">Screen Preview</div>
         <div className="video-wrap" ref={wrapRef}>
           <video ref={videoRef} autoPlay muted playsInline />
-          {/* status chip */}
           <div style={{
             position: 'absolute', top: 8, left: 8, zIndex: 50,
             background: 'rgba(0,0,0,0.55)', padding: '6px 10px',
@@ -154,8 +157,8 @@ export default function App() {
           <div className="section-title">Tips</div>
           <ul className="small" style={{ marginTop: 0 }}>
             <li>Start Capture, align ROI, Calibrate while the board is idle, then click Train in-game.</li>
-            <li>The pattern updates live during the reveal; repeat it in-game. Next round arms automatically.</li>
-            <li>For tough lighting, switch to Advanced and enable Color Gate.</li>
+            <li>The pattern updates during reveal; repeat it. Next round arms automatically.</li>
+            <li>High-sensitivity is enabled by default to catch fast flashes.</li>
           </ul>
         </div>
       </div>

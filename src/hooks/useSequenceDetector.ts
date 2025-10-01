@@ -20,8 +20,8 @@ type DetectorState = {
   frame: number;
   phase: Phase;
   roundIndex: number;
-  revealLen: number;     // prefix of steps[] that belongs to the reveal
-  inputProgress: number; // 0..N while waiting-input
+  revealLen: number;
+  inputProgress: number;
   status: string;
 };
 
@@ -63,8 +63,15 @@ export function useSequenceDetector(params: {
   const refractory = useRef<Uint8Array>(new Uint8Array(N));
   const belowLow = useRef<Uint8Array>(new Uint8Array(N));
 
-  // Reveal/input tracking
+  // Quick‑flash energy buffers
+  const energyBuf = useRef<Float32Array>(new Float32Array(1));
+  const energySum = useRef<Float32Array>(new Float32Array(N));
+  const energyIdx = useRef<number>(0);
+  const energyW = useRef<number>(5);
+
+  // FSM trackers
   const lastEventMs = useRef<number | null>(null);
+  const lastRevealEventMs = useRef<number | null>(null);
   const revealIndices = useRef<number[]>([]);
   const inputCount = useRef<number>(0);
 
@@ -75,7 +82,7 @@ export function useSequenceDetector(params: {
     return { canvas, ctx };
   }, []);
 
-  // Reset arrays when grid changes
+  // Reset when grid changes
   useEffect(() => {
     const n = rows * cols;
     baseline.current = new Float32Array(n);
@@ -83,11 +90,17 @@ export function useSequenceDetector(params: {
     hold.current = new Uint8Array(n);
     refractory.current = new Uint8Array(n);
     belowLow.current = new Uint8Array(n);
-    belowLow.current.fill(1); // allow the first trigger without prior low
+    belowLow.current.fill(1);
+
+    energyW.current = Math.max(2, Math.floor(config.energyWindow || 5));
+    energyBuf.current = new Float32Array(n * energyW.current);
+    energySum.current = new Float32Array(n);
+    energyIdx.current = 0;
 
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;
+    lastRevealEventMs.current = null;
 
     setState(s => ({
       ...s,
@@ -101,12 +114,13 @@ export function useSequenceDetector(params: {
       inputProgress: 0,
       status: 'idle'
     }));
-  }, [rows, cols]);
+  }, [rows, cols, config.energyWindow]);
 
   const reset = useCallback(() => {
     revealIndices.current = [];
     inputCount.current = 0;
     lastEventMs.current = null;
+    lastRevealEventMs.current = null;
     setState(s => ({
       ...s,
       steps: [],
@@ -148,7 +162,9 @@ export function useSequenceDetector(params: {
       deltaSmooth.current[i] = 0;
       hold.current[i] = 0;
       refractory.current[i] = 0;
-      belowLow.current[i] = 1; // armed after calibration
+      belowLow.current[i] = 1;
+      energySum.current[i] = 0;
+      for (let k = 0; k < energyW.current; k++) energyBuf.current[k * N + i] = 0;
     }
     setState(s => ({ ...s, calibrating: false, status: 'ready' }));
   }, [videoRef, roi, rows, cols, config.paddingPct, scratch]);
@@ -156,6 +172,7 @@ export function useSequenceDetector(params: {
   const arm = useCallback(() => {
     revealIndices.current = [];
     inputCount.current = 0;
+    lastRevealEventMs.current = null;
     setState(s => ({
       ...s,
       phase: 'armed',
@@ -169,14 +186,12 @@ export function useSequenceDetector(params: {
     const r = Math.floor(cellIdx / cols);
     const c = cellIdx % cols;
 
-    // Append step
     setState(s => ({
       ...s,
       steps: [...s.steps, { row: r, col: c, t: ts, frame, confidence: conf }],
       activeIndex: s.steps.length
     }));
 
-    // Phase transitions decided inside updater
     const now = ts;
     const last = lastEventMs.current;
     lastEventMs.current = now;
@@ -194,18 +209,24 @@ export function useSequenceDetector(params: {
           if (config.autoRoundDetect) { phase = 'armed'; status = 'armed'; }
         // fallthrough
         case 'armed': {
-          // First event starts reveal
           phase = 'reveal';
           revealIndices.current = [cellIdx];
           revealLen = 1;
           inputCount.current = 0;
+          lastRevealEventMs.current = now;
           status = 'reveal:1';
           break;
         }
         case 'reveal': {
           const isInputEvent = kind === 'input';
-          // Prefer color: first green flips immediately; otherwise only flip on a clear gap
-          if (isInputEvent || isi > Math.max(600, config.clusterGapMs)) {
+          const sinceLastReveal = lastRevealEventMs.current ? now - lastRevealEventMs.current : Infinity;
+          if (isInputEvent) {
+            phase = 'waiting-input';
+            inputCount.current = 1;
+            inputProgress = 1;
+            status = `input:1/${revealIndices.current.length}`;
+          } else if (sinceLastReveal > Math.max(650, config.clusterGapMs)) {
+            // No recent reveal event → assume reveal ended
             phase = 'waiting-input';
             inputCount.current = 1;
             inputProgress = 1;
@@ -213,6 +234,7 @@ export function useSequenceDetector(params: {
           } else {
             revealIndices.current.push(cellIdx);
             revealLen = revealIndices.current.length;
+            lastRevealEventMs.current = now;
             status = `reveal:${revealLen}`;
           }
           break;
@@ -228,7 +250,6 @@ export function useSequenceDetector(params: {
           break;
         }
         case 'rearming':
-          // ignore further inputs until re-armed
           break;
       }
 
@@ -236,13 +257,13 @@ export function useSequenceDetector(params: {
     });
   }, [cols, config.autoRoundDetect, config.clusterGapMs]);
 
-  // When we enter "rearming", schedule clear + next round (always clears the Pattern)
+  // Auto-advance: when we enter rearming, clear pattern and arm next round
   useEffect(() => {
     if (state.phase !== 'rearming') return;
     const t = window.setTimeout(() => {
       setState(s => ({
         ...s,
-        steps: [],          // always clear the pattern block between rounds
+        steps: [],
         activeIndex: null,
         roundIndex: s.roundIndex + 1,
         revealLen: 0,
@@ -253,11 +274,12 @@ export function useSequenceDetector(params: {
       revealIndices.current = [];
       inputCount.current = 0;
       lastEventMs.current = null;
+      lastRevealEventMs.current = null;
     }, Math.max(0, config.rearmDelayMs));
     return () => clearTimeout(t);
   }, [state.phase, config.rearmDelayMs]);
 
-  // Failsafe timeout while waiting for input
+  // Fail-safe timeout while waiting for input
   useEffect(() => {
     if (state.phase !== 'waiting-input') return;
     const t = window.setTimeout(() => {
@@ -271,11 +293,12 @@ export function useSequenceDetector(params: {
       revealIndices.current = [];
       inputCount.current = 0;
       lastEventMs.current = null;
+      lastRevealEventMs.current = null;
     }, Math.max(2000, config.inputTimeoutMs));
     return () => window.clearTimeout(t);
   }, [state.phase, config.inputTimeoutMs]);
 
-  // Main sampling loop
+  // Main loop
   useEffect(() => {
     const tick = () => {
       const now = performance.now();
@@ -294,7 +317,7 @@ export function useSequenceDetector(params: {
       // 1) Luminance
       const lums = sampleGridLuminance(video, roi, rows, cols, config.paddingPct, scratch);
 
-      // 2) Color fractions
+      // 2) Color fractions (teal vs green)
       const color = sampleGridColorFractions(
         video, roi, rows, cols, config.paddingPct, scratch, {
           revealRgb: hexToRgb(config.colorRevealHex),
@@ -315,7 +338,7 @@ export function useSequenceDetector(params: {
         deltas[i] = lums[i] - baseline.current[i];
       }
 
-      // 4) Remove global drift (median)
+      // 4) Remove global drift
       const med = median(deltas);
       let hotIdx: number | null = null;
       let hotVal = -Infinity;
@@ -328,22 +351,34 @@ export function useSequenceDetector(params: {
 
       const frameIndex = (state.frame || 0) + 1;
 
-      // 5) Per-cell trigger with color‑aware local threshold
+      // 5) Energy ring update (quick‑flash)
+      const W = energyW.current;
+      const idx = energyIdx.current;
+      const base = idx * N;
+      const nextIdx = (idx + 1) % W;
+      for (let i = 0; i < count; i++) {
+        const old = energyBuf.current[base + i];
+        const pos = Math.max(0, deltaSmooth.current[i] - config.thrLow);
+        energyBuf.current[base + i] = pos;
+        energySum.current[i] += pos - old;
+      }
+      energyIdx.current = nextIdx;
+      const energyThr = Math.max(1, (config.thrHigh - config.thrLow) * (config.energyScale || 2.5));
+
+      // 6) Trigger logic
       for (let i = 0; i < count; i++) {
         if (refractory.current[i] > 0) { refractory.current[i]--; hold.current[i] = 0; continue; }
         const v = deltaSmooth.current[i];
 
-        // Hysteresis arming
         if (v < config.thrLow) { belowLow.current[i] = 1; hold.current[i] = 0; }
 
-        // Color gate
         const fracReveal = color.revealFrac[i];
         const fracInput  = color.inputFrac[i];
         const matchReveal = !config.colorGateEnabled || fracReveal >= config.colorMinFracReveal;
         const matchInput  = !config.colorGateEnabled || fracInput  >= config.colorMinFracInput;
         const passesColor = config.colorGateEnabled ? (matchReveal || matchInput) : true;
 
-        // Slightly lower local threshold if we strongly match the expected color
+        // Color‑aware local threshold (slightly lower when color is strong)
         let localThr = config.thrHigh;
         if (config.colorGateEnabled) {
           const strongReveal = fracReveal >= Math.max(config.colorMinFracReveal * 3, 0.004);
@@ -353,31 +388,30 @@ export function useSequenceDetector(params: {
           }
         }
 
-        if (passesColor && belowLow.current[i] && v >= localThr) {
-          hold.current[i] = Math.min(255, hold.current[i] + 1);
-          if (hold.current[i] >= config.holdFrames) {
-            // Determine event kind by color; if ambiguous, use phase
-            let kind: EventKind;
-            if (config.colorGateEnabled) {
-              if (matchInput && !matchReveal) kind = 'input';
-              else if (matchReveal && !matchInput) kind = 'reveal';
-              else kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
-            } else {
-              kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
-            }
+        const byHold = belowLow.current[i] && v >= localThr && (hold.current[i] + 1) >= config.holdFrames;
+        const byEnergy = config.quickFlashEnabled && belowLow.current[i] && energySum.current[i] >= energyThr;
 
-            const conf = clamp((v - localThr) / Math.max(1, localThr) + 1, 0, 1);
-
-            if (state.phase === 'idle' && config.autoRoundDetect) {
-              setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
-            }
-
-            // Confirmed detection
-            pushStep(i, performance.now(), frameIndex, conf, kind);
-            refractory.current[i] = config.refractoryFrames;
-            belowLow.current[i] = 0;
-            hold.current[i] = 0;
+        if (passesColor && (byHold || byEnergy)) {
+          let kind: EventKind;
+          if (config.colorGateEnabled) {
+            if (matchInput && !matchReveal) kind = 'input';
+            else if (matchReveal && !matchInput) kind = 'reveal';
+            else kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
+          } else {
+            kind = (state.phase === 'waiting-input' ? 'input' : 'reveal');
           }
+
+          const conf = clamp((v - localThr) / Math.max(1, localThr) + 1, 0, 1);
+          if (state.phase === 'idle' && config.autoRoundDetect) {
+            setState(s => ({ ...s, phase: 'armed', status: 'armed' }));
+          }
+
+          pushStep(i, performance.now(), frameIndex, conf, kind);
+          refractory.current[i] = config.refractoryFrames;
+          belowLow.current[i] = 0;
+          hold.current[i] = 0;
+          energySum.current[i] = 0;
+          for (let k = 0; k < W; k++) energyBuf.current[k * N + i] = 0;
         } else {
           if (!passesColor) hold.current[i] = 0;
           else if (v >= localThr) hold.current[i] = Math.min(255, hold.current[i] + 1);
@@ -407,6 +441,7 @@ export function useSequenceDetector(params: {
     config.colorGateEnabled, config.colorRevealHex, config.colorInputHex,
     config.colorHueTol, config.colorSatMin, config.colorValMin,
     config.colorMinFracReveal, config.colorMinFracInput,
+    config.quickFlashEnabled, config.energyScale, // energyWindow handled on reset
     state.running, state.frame, state.phase, pushStep
   ]);
 
